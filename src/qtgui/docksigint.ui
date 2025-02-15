@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DockSigint</class>
+ <widget class="QDockWidget" name="DockSigint">
+  <property name="geometry">
+   <rect>
+    <x>0</x>
+    <y>0</y>
+    <width>300</width>
+    <height>500</height>
+   </rect>
+  </property>
+  <property name="minimumSize">
+   <size>
+    <width>300</width>
+    <height>400</height>
+   </size>
+  </property>
+  <property name="windowIcon">
+   <iconset resource="../../resources/icons.qrc">
+    <normaloff>:/icons/icons/chat.svg</normaloff>:/icons/icons/chat.svg</iconset>
+  </property>
+  <property name="allowedAreas">
+   <set>Qt::LeftDockWidgetArea|Qt::RightDockWidgetArea</set>
+  </property>
+  <property name="windowTitle">
+   <string>SIGINT</string>
+  </property>
+  <widget class="QWidget" name="dockWidgetContents">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <property name="spacing">
+     <number>2</number>
+    </property>
+    <property name="leftMargin">
+     <number>5</number>
+    </property>
+    <property name="topMargin">
+     <number>5</number>
+    </property>
+    <property name="rightMargin">
+     <number>5</number>
+    </property>
+    <property name="bottomMargin">
+     <number>5</number>
+    </property>
+    <item>
+     <widget class="QTextEdit" name="chatDisplay">
+      <property name="readOnly">
+       <bool>true</bool>
+      </property>
+      <property name="styleSheet">
+       <string notr="true">QTextEdit {
+         background-color: #1e1e1e;
+         color: #d4d4d4;
+         border: 1px solid #2d2d2d;
+         border-radius: 4px;
+       }</string>
+      </property>
+     </widget>
+    </item>
+    <item>
+     <layout class="QHBoxLayout" name="inputLayout">
+      <item>
+       <widget class="QLineEdit" name="chatInput">
+        <property name="styleSheet">
+         <string notr="true">QLineEdit {
+           background-color: #1e1e1e;
+           color: #d4d4d4;
+           border: 1px solid #2d2d2d;
+           border-radius: 4px;
+           padding: 4px;
+         }</string>
+        </property>
+        <property name="placeholderText">
+         <string>Type your message here...</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="sendButton">
+        <property name="styleSheet">
+         <string notr="true">QPushButton {
+           background-color: #0e639c;
+           color: white;
+           border: none;
+           border-radius: 4px;
+           padding: 4px 12px;
+         }
+         QPushButton:hover {
+           background-color: #1177bb;
+         }
+         QPushButton:pressed {
+           background-color: #0d5789;
+         }</string>
+        </property>
+        <property name="text">
+         <string>Send</string>
+        </property>
+       </widget>
+      </item>
+     </layout>
+    </item>
+   </layout>
+  </widget>
+ </widget>
+ <resources>
+  <include location="../../resources/icons.qrc"/>
+ </resources>
+ <connections/>
+</ui> 
