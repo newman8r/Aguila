@@ -3,6 +3,11 @@
 
 #include <QDockWidget>
 #include <QSettings>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
 
 namespace Ui {
     class DockSigint;
@@ -26,10 +31,20 @@ signals:
 private slots:
     void onSendClicked();
     void onReturnPressed();
+    void onNetworkReply(QNetworkReply *reply);
 
 private:
     Ui::DockSigint *ui;
     void appendMessage(const QString &message, bool isUser = true);
+    
+    // Claude API integration
+    QNetworkAccessManager *networkManager;
+    QString anthropicApiKey;
+    QString currentModel;
+    QVector<QPair<QString, QString>> messageHistory;  // pairs of role,content
+    
+    void sendToClaude(const QString &message);
+    void loadEnvironmentVariables();
 };
 
 #endif // DOCKSIGINT_H 
