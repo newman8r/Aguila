@@ -150,6 +150,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     uiDockAudio = new DockAudio();
     uiDockInputCtl = new DockInputCtl();
     uiDockFft = new DockFft();
+    uiDockSigint = new DockSigint();
     BandPlan::Get().setConfigDir(m_cfg_dir);
     Bookmarks::Get().setConfigDir(m_cfg_dir);
     BandPlan::Get().load();
@@ -161,6 +162,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     uiDockFft->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_F));
     uiDockAudio->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_A));
     uiDockBookmarks->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_B));
+    uiDockSigint->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_S));
     ui->mainToolBar->toggleViewAction()->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_T));
 
     /* frequency setting shortcut */
@@ -190,8 +192,10 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     addDockWidget(Qt::RightDockWidgetArea, uiDockInputCtl);
     addDockWidget(Qt::RightDockWidgetArea, uiDockRxOpt);
     addDockWidget(Qt::RightDockWidgetArea, uiDockFft);
+    addDockWidget(Qt::RightDockWidgetArea, uiDockSigint);
     tabifyDockWidget(uiDockInputCtl, uiDockRxOpt);
     tabifyDockWidget(uiDockRxOpt, uiDockFft);
+    tabifyDockWidget(uiDockFft, uiDockSigint);
     uiDockRxOpt->raise();
 
     addDockWidget(Qt::RightDockWidgetArea, uiDockAudio);
@@ -213,6 +217,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     ui->menu_View->addAction(uiDockRDS->toggleViewAction());
     ui->menu_View->addAction(uiDockAudio->toggleViewAction());
     ui->menu_View->addAction(uiDockFft->toggleViewAction());
+    ui->menu_View->addAction(uiDockSigint->toggleViewAction());
     ui->menu_View->addAction(uiDockBookmarks->toggleViewAction());
     ui->menu_View->addSeparator();
     ui->menu_View->addAction(ui->mainToolBar->toggleViewAction());
