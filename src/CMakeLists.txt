@@ -84,6 +84,7 @@ if(Qt6_FOUND)
         Qt6::Svg
         Qt6::SvgWidgets
         Qt6::WebEngineWidgets
+        Qt6::Sql
     )
 else()
     target_link_libraries(${PROJECT_NAME}
@@ -92,6 +93,7 @@ else()
         Qt5::Widgets
         Qt5::Svg
         Qt5::WebEngineWidgets
+        Qt5::Sql
     )
 endif()
 

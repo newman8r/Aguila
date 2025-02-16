@@ -10,6 +10,7 @@
 #include <QJsonArray>
 #include <QWebEngineView>
 #include <QWebChannel>
+#include <QSqlDatabase>
 
 namespace Ui {
     class DockSigint;
@@ -39,6 +40,7 @@ private slots:
 private:
     Ui::DockSigint *ui;
     void appendMessage(const QString &message, bool isUser = true);
+    void appendMessageToView(const QString &message, bool isUser);
     
     // Claude API integration
     QNetworkAccessManager *networkManager;
@@ -54,6 +56,14 @@ private:
     QString chatHtml;
     void updateChatView();
     QString getBaseHtml();
+
+    // Database related
+    QSqlDatabase db;
+    int currentChatId;
+    void initializeDatabase();
+    void loadChatHistory();
+    void saveMessage(const QString &role, const QString &content);
+    QString getDatabasePath();
 };
 
 #endif // DOCKSIGINT_H 
