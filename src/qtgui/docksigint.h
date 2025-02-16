@@ -12,6 +12,7 @@
 #include <QWebChannel>
 #include <QSqlDatabase>
 #include <QThread>
+#include <QDateTime>
 
 // Worker class for network operations
 class NetworkWorker : public QObject
@@ -36,6 +37,7 @@ private:
 class DatabaseWorker : public QObject
 {
     Q_OBJECT
+
 public:
     explicit DatabaseWorker(const QString &dbPath, QObject *parent = nullptr);
     ~DatabaseWorker();
@@ -43,11 +45,15 @@ public:
 public slots:
     void saveMessage(int chatId, const QString &role, const QString &content);
     void loadChatHistory(int chatId);
+    void loadAllChats();
+    void createChat(const QString &name);
 
 signals:
     void messageSaved(qint64 id);
     void historyLoaded(const QVector<QPair<QString, QString>> &messages);
-    void error(const QString &error);
+    void chatsLoaded(const QVector<QPair<int, QString>> &chats);
+    void chatCreated(int chatId, const QString &name);
+    void error(const QString &message);
 
 private:
     QSqlDatabase db;
@@ -72,7 +78,6 @@ public:
     void readSettings(QSettings *settings);
 
 signals:
-    void messageSubmitted(const QString &message);
     void sendMessageToWorker(const QString &apiKey, const QString &model, const QJsonArray &messages);
     void saveMessageToDb(int chatId, const QString &role, const QString &content);
     void loadHistoryFromDb(int chatId);
@@ -82,41 +87,49 @@ private slots:
     void onReturnPressed();
     void onWorkerMessageReceived(const QString &message);
     void onWorkerErrorOccurred(const QString &error);
-    void initializeWebView();
+    void onNewChatClicked();
+    void onChatSelected(int index);
+    void onChatsLoaded(const QVector<QPair<int, QString>> &chats);
 
 private:
-    Ui::DockSigint *ui;
-    void appendMessage(const QString &message, bool isUser = true);
-    void appendMessageToView(const QString &message, bool isUser);
-    
-    // Message tracking
     struct Message {
-        qint64 id;  // -1 for unsaved messages
+        qint64 id;
         QString role;
         QString content;
     };
-    QVector<Message> messageHistory;
-    
-    // Worker threads
-    QThread networkThread;
-    QThread databaseThread;
+
+    struct Chat {
+        int id;
+        QString name;
+        QDateTime createdAt;
+    };
+
+    Ui::DockSigint *ui;
+    QWebEngineView *webView;
     NetworkWorker *networkWorker;
     DatabaseWorker *databaseWorker;
+    QThread networkThread;
+    QThread databaseThread;
     QString anthropicApiKey;
     QString currentModel;
-    
-    void sendToClaude(const QString &message);
-    void loadEnvironmentVariables();
-
-    // Web view related
-    QWebEngineView *webView;
-    QString chatHtml;
-    void updateChatView();
-    QString getBaseHtml();
-
-    // Database related
     int currentChatId;
+    QVector<Message> messageHistory;
+    QVector<Chat> chatList;
+    QString chatHtml;
+
+    void loadEnvironmentVariables();
+    QString getBaseHtml();
+    void initializeWebView();
+    void updateChatView();
+    void appendMessage(const QString &message, bool isUser = true);
+    void appendMessageToView(const QString &message, bool isUser);
+    void sendToClaude(const QString &message);
     QString getDatabasePath();
+    void loadChats();
+    void createNewChat();
+    void switchToChat(int chatId);
+    void updateChatSelector();
+    void clearChat();
 };
 
 #endif // DOCKSIGINT_H 

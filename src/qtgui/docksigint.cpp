@@ -232,6 +232,71 @@ void DatabaseWorker::loadChatHistory(int chatId)
     emit historyLoaded(messages);
 }
 
+void DatabaseWorker::loadAllChats()
+{
+    qDebug() << "\n=== 📚 Loading All Chats 📚 ===";
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("SELECT id, name FROM chats ORDER BY id ASC");
+    
+    if (!query.exec()) {
+        QString error = "Error loading chats: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QVector<QPair<int, QString>> chats;
+    while (query.next()) {
+        int id = query.value(0).toInt();
+        QString name = query.value(1).toString();
+        chats.append(qMakePair(id, name));
+        qDebug() << "📂 Loaded chat:" << id << "-" << name;
+    }
+
+    qDebug() << "✅ Loaded" << chats.size() << "chats";
+    emit chatsLoaded(chats);
+}
+
+void DatabaseWorker::createChat(const QString &name)
+{
+    qDebug() << "\n=== 📝 Creating New Chat 📝 ===";
+    qDebug() << "Name:" << name;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    db.transaction();
+    QSqlQuery query(db);
+    query.prepare("INSERT INTO chats (name) VALUES (?)");
+    query.addBindValue(name);
+
+    if (!query.exec()) {
+        QString error = "Error creating chat: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        db.rollback();
+        emit this->error(error);
+        return;
+    }
+
+    int chatId = query.lastInsertId().toInt();
+    db.commit();
+    
+    qDebug() << "✅ Created new chat with ID:" << chatId;
+    emit chatCreated(chatId, name);
+}
+
 DockSigint::DockSigint(QWidget *parent) :
     QDockWidget(parent),
     ui(new Ui::DockSigint),
@@ -342,6 +407,15 @@ DockSigint::DockSigint(QWidget *parent) :
             appendMessageToView(newMsg.content, newMsg.role == "user");
         }
     });
+    connect(databaseWorker, &DatabaseWorker::chatsLoaded, this, &DockSigint::onChatsLoaded);
+    connect(databaseWorker, &DatabaseWorker::chatCreated, this, [this](int chatId, const QString &name) {
+        Chat newChat;
+        newChat.id = chatId;
+        newChat.name = name;
+        chatList.append(newChat);
+        updateChatSelector();
+        switchToChat(chatId);
+    });
     databaseThread.start();
     qDebug() << "✅ Database worker started";
 
@@ -392,6 +466,14 @@ DockSigint::DockSigint(QWidget *parent) :
     // Set the HTML content
     updateChatView();
     
+    // Connect chat management signals
+    connect(ui->newChatButton, &QPushButton::clicked, this, &DockSigint::onNewChatClicked);
+    connect(ui->chatSelector, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &DockSigint::onChatSelected);
+
+    // Load existing chats
+    databaseWorker->loadAllChats();
+
     qDebug() << "\n=== SIGINT Panel Initialization ===";
     qDebug() << "App directory:" << QCoreApplication::applicationDirPath();
     qDebug() << "Current working directory:" << QDir::currentPath();
@@ -741,4 +823,71 @@ QString DockSigint::getDatabasePath()
     QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/gqrx";
     QDir().mkpath(configDir);  // Ensure directory exists
     return configDir + "/chat_history.db";
+}
+
+void DockSigint::loadChats()
+{
+    qDebug() << "Loading all chats...";
+    emit loadHistoryFromDb(currentChatId);
+}
+
+void DockSigint::createNewChat()
+{
+    int newChatNum = chatList.isEmpty() ? 1 : chatList.last().id + 1;
+    QString chatName = QString("Chat %1").arg(newChatNum);
+    databaseWorker->createChat(chatName);
+}
+
+void DockSigint::switchToChat(int chatId)
+{
+    if (chatId == currentChatId) return;
+
+    currentChatId = chatId;
+    messageHistory.clear();
+    clearChat();
+    emit loadHistoryFromDb(currentChatId);
+}
+
+void DockSigint::updateChatSelector()
+{
+    ui->chatSelector->clear();
+    for (const auto &chat : chatList) {
+        ui->chatSelector->addItem(chat.name, chat.id);
+    }
+    
+    // Set current chat
+    int index = ui->chatSelector->findData(currentChatId);
+    if (index != -1) {
+        ui->chatSelector->setCurrentIndex(index);
+    }
+}
+
+void DockSigint::clearChat()
+{
+    webView->page()->runJavaScript("document.getElementById('messages').innerHTML = '';");
+}
+
+void DockSigint::onNewChatClicked()
+{
+    createNewChat();
+}
+
+void DockSigint::onChatSelected(int index)
+{
+    if (index >= 0) {
+        int chatId = ui->chatSelector->itemData(index).toInt();
+        switchToChat(chatId);
+    }
+}
+
+void DockSigint::onChatsLoaded(const QVector<QPair<int, QString>> &chats)
+{
+    chatList.clear();
+    for (const auto &chat : chats) {
+        Chat newChat;
+        newChat.id = chat.first;
+        newChat.name = chat.second;
+        chatList.append(newChat);
+    }
+    updateChatSelector();
 } 
