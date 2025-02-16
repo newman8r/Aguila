@@ -8,6 +8,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QWebEngineView>
+#include <QWebChannel>
 
 namespace Ui {
     class DockSigint;
@@ -32,6 +34,7 @@ private slots:
     void onSendClicked();
     void onReturnPressed();
     void onNetworkReply(QNetworkReply *reply);
+    void initializeWebView();
 
 private:
     Ui::DockSigint *ui;
@@ -45,6 +48,12 @@ private:
     
     void sendToClaude(const QString &message);
     void loadEnvironmentVariables();
+
+    // Web view related
+    QWebEngineView *webView;
+    QString chatHtml;
+    void updateChatView();
+    QString getBaseHtml();
 };
 
 #endif // DOCKSIGINT_H 

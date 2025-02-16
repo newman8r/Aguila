@@ -4,6 +4,12 @@
 #include <QApplication>
 #include <QTimer>
 #include <QStandardPaths>
+#include <QClipboard>
+#include <QWebEngineView>
+#include <QWebEnginePage>
+#include <QWebEngineSettings>
+#include <QWebChannel>
+#include <QVBoxLayout>
 #include "docksigint.h"
 #include "ui_docksigint.h"
 
@@ -41,6 +47,16 @@ DockSigint::DockSigint(QWidget *parent) :
     
     ui->setupUi(this);
 
+    // Initialize web view
+    webView = new QWebEngineView(ui->chatDisplay);
+    webView->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
+    webView->settings()->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard, true);
+    webView->page()->setWebChannel(new QWebChannel(this));
+    auto *layout = new QVBoxLayout(ui->chatDisplay);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->addWidget(webView);
+    ui->chatDisplay->setLayout(layout);
+
     // Initialize network manager
     networkManager = new QNetworkAccessManager(this);
     connect(networkManager, &QNetworkAccessManager::finished, this, &DockSigint::onNetworkReply);
@@ -52,9 +68,13 @@ DockSigint::DockSigint(QWidget *parent) :
     // Load environment variables
     loadEnvironmentVariables();
 
-    // Set initial welcome message
-    ui->chatDisplay->append("<span style='color: #569cd6;'>Welcome to the SIGINT Chat Interface!</span>");
-    ui->chatDisplay->append("<span style='color: #569cd6;'>Connected to: " + currentModel + "</span>");
+    // Initialize chat HTML
+    chatHtml = getBaseHtml();
+    updateChatView();
+
+    // Add welcome message
+    appendMessage("Welcome to the SIGINT Chat Interface!", false);
+    appendMessage("Connected to: " + currentModel, false);
     
     qDebug() << "\n=== SIGINT Panel Initialization ===";
     qDebug() << "App directory:" << QCoreApplication::applicationDirPath();
@@ -156,17 +176,182 @@ void DockSigint::onReturnPressed()
     onSendClicked();
 }
 
+QString DockSigint::getBaseHtml()
+{
+    return QString(
+        "<!DOCTYPE html>"
+        "<html>"
+        "<head>"
+        "<style>"
+        "html, body {"
+        "    margin: 0;"
+        "    padding: 0;"
+        "    height: 100%;"
+        "    background: #1e1e1e;"
+        "    color: #d4d4d4;"
+        "    font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;"
+        "}"
+        "#chat-container {"
+        "    padding: 16px;"
+        "    height: 100%;"
+        "    overflow-y: auto;"
+        "    scroll-behavior: smooth;"
+        "    display: flex;"
+        "    flex-direction: column;"
+        "}"
+        "#messages {"
+        "    flex-grow: 1;"
+        "    min-height: min-content;"
+        "}"
+        ".message {"
+        "    margin: 16px 0;"
+        "    opacity: 0;"
+        "    transform: translateY(20px);"
+        "    animation: messageIn 0.3s ease-out forwards;"
+        "}"
+        "@keyframes messageIn {"
+        "    to {"
+        "        opacity: 1;"
+        "        transform: translateY(0);"
+        "    }"
+        "}"
+        ".message-content {"
+        "    padding: 16px;"
+        "    border-radius: 8px;"
+        "    line-height: 1.5;"
+        "    position: relative;"
+        "    overflow: hidden;"
+        "}"
+        ".user-message .message-content {"
+        "    background: #2d2d2d;"
+        "    border: 1px solid #3d3d3d;"
+        "    box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+        "}"
+        ".assistant-message .message-content {"
+        "    background: #1e1e1e;"
+        "}"
+        ".sender {"
+        "    font-weight: 500;"
+        "    margin-bottom: 8px;"
+        "}"
+        ".user-message .sender {"
+        "    color: #4ec9b0;"
+        "}"
+        ".assistant-message .sender {"
+        "    color: #569cd6;"
+        "}"
+        ".copy-button {"
+        "    position: absolute;"
+        "    top: 8px;"
+        "    right: 8px;"
+        "    padding: 4px 8px;"
+        "    background: #3d3d3d;"
+        "    border: none;"
+        "    border-radius: 4px;"
+        "    color: #569cd6;"
+        "    cursor: pointer;"
+        "    opacity: 0.8;"
+        "    transition: all 0.2s ease;"
+        "    font-size: 14px;"
+        "}"
+        ".message-content:hover .copy-button {"
+        "    opacity: 1;"
+        "}"
+        ".copy-button:hover {"
+        "    background: #4d4d4d;"
+        "}"
+        ".welcome {"
+        "    text-align: center;"
+        "    padding: 24px 0;"
+        "}"
+        ".welcome-title {"
+        "    color: #569cd6;"
+        "    font-size: 18px;"
+        "    font-weight: 500;"
+        "    margin-bottom: 8px;"
+        "}"
+        ".welcome-subtitle {"
+        "    color: #4ec9b0;"
+        "    font-size: 14px;"
+        "}"
+        "pre {"
+        "    background: #2d2d2d;"
+        "    padding: 12px;"
+        "    border-radius: 4px;"
+        "    overflow-x: auto;"
+        "}"
+        "code {"
+        "    font-family: \"Cascadia Code\", \"Source Code Pro\", Menlo, Monaco, Consolas, monospace;"
+        "}"
+        "</style>"
+        "<script>"
+        "function copyMessage(element) {"
+        "    const text = element.parentElement.querySelector('.text').innerText;"
+        "    if (navigator.clipboard) {"
+        "        navigator.clipboard.writeText(text).then(() => {"
+        "            const button = element;"
+        "            button.innerHTML = '✓';"
+        "            button.style.background = '#4ec9b0';"
+        "            button.style.color = '#ffffff';"
+        "            setTimeout(() => {"
+        "                button.innerHTML = '📋';"
+        "                button.style.background = '#3d3d3d';"
+        "                button.style.color = '#569cd6';"
+        "            }, 1000);"
+        "        }).catch(err => {"
+        "            console.error('Failed to copy:', err);"
+        "        });"
+        "    }"
+        "}"
+        "function scrollToBottom() {"
+        "    const container = document.getElementById('chat-container');"
+        "    container.scrollTop = container.scrollHeight;"
+        "}"
+        "function appendMessage(html) {"
+        "    const messages = document.getElementById('messages');"
+        "    messages.insertAdjacentHTML('beforeend', html);"
+        "    scrollToBottom();"
+        "}"
+        "</script>"
+        "</head>"
+        "<body>"
+        "<div id=\"chat-container\">"
+        "    <div id=\"messages\"></div>"
+        "</div>"
+        "</body>"
+        "</html>"
+    );
+}
+
+void DockSigint::initializeWebView()
+{
+    webView->setContextMenuPolicy(Qt::NoContextMenu);
+    webView->setStyleSheet("QWebEngineView { background: #1e1e1e; }");
+}
+
+void DockSigint::updateChatView()
+{
+    webView->setHtml(chatHtml);
+    // Wait for the page to load before scrolling
+    webView->page()->runJavaScript("scrollToBottom();");
+}
+
 void DockSigint::appendMessage(const QString &message, bool isUser)
 {
-    QString formattedMessage;
-    if (isUser) {
-        formattedMessage = QString("<div style='margin: 5px;'><span style='color: #4ec9b0;'>User:</span> %1</div>")
-                          .arg(message.toHtmlEscaped());
-    } else {
-        formattedMessage = QString("<div style='margin: 5px;'><span style='color: #569cd6;'>Assistant:</span> %1</div>")
-                          .arg(message.toHtmlEscaped());
-    }
-    ui->chatDisplay->append(formattedMessage);
+    QString messageHtml = QString(
+        "<div class=\"message %1\">"
+        "<div class=\"message-content\">"
+        "<button class=\"copy-button\" onclick=\"copyMessage(this)\">📋</button>"
+        "<div class=\"sender\">%2</div>"
+        "<div class=\"text\">%3</div>"
+        "</div>"
+        "</div>"
+    ).arg(isUser ? "user-message" : "assistant-message",
+          isUser ? "User" : "Assistant",
+          message.toHtmlEscaped());
+
+    // Instead of rebuilding the entire HTML, just append the new message
+    webView->page()->runJavaScript(QString("appendMessage(`%1`);").arg(messageHtml));
 }
 
 void DockSigint::sendToClaude(const QString &message)

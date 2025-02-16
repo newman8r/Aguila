@@ -27,7 +27,7 @@
    <string>SIGINT</string>
   </property>
   <widget class="QWidget" name="dockWidgetContents">
-   <layout class="QVBoxLayout" name="verticalLayout">
+   <layout class="QVBoxLayout" name="chatLayout">
     <property name="spacing">
      <number>2</number>
     </property>
@@ -44,14 +44,10 @@
      <number>5</number>
     </property>
     <item>
-     <widget class="QTextEdit" name="chatDisplay">
-      <property name="readOnly">
-       <bool>true</bool>
-      </property>
+     <widget class="QWidget" name="chatDisplay">
       <property name="styleSheet">
-       <string notr="true">QTextEdit {
+       <string notr="true">QWidget {
          background-color: #1e1e1e;
-         color: #d4d4d4;
          border: 1px solid #2d2d2d;
          border-radius: 4px;
        }</string>
