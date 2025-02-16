@@ -52,6 +52,7 @@ signals:
 private:
     QSqlDatabase db;
     void initializeDatabase();
+    void verifyDatabaseState();
 };
 
 namespace Ui {

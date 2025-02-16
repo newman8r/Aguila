@@ -17,31 +17,6 @@
 #include "docksigint.h"
 #include "ui_docksigint.h"
 
-// Custom message handler to ensure debug messages are displayed
-void messageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-{
-    QByteArray localMsg = msg.toLocal8Bit();
-    const char *file = context.file ? context.file : "";
-    const char *function = context.function ? context.function : "";
-    switch (type) {
-    case QtDebugMsg:
-        fprintf(stderr, "Debug: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
-        break;
-    case QtInfoMsg:
-        fprintf(stderr, "Info: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
-        break;
-    case QtWarningMsg:
-        fprintf(stderr, "Warning: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
-        break;
-    case QtCriticalMsg:
-        fprintf(stderr, "Critical: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
-        break;
-    case QtFatalMsg:
-        fprintf(stderr, "Fatal: %s (%s:%u, %s)\n", localMsg.constData(), file, context.line, function);
-        abort();
-    }
-}
-
 // NetworkWorker implementation
 NetworkWorker::NetworkWorker(QObject *parent) : QObject(parent)
 {
@@ -59,8 +34,7 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
     QJsonObject requestBody{
         {"model", model},
         {"messages", messages},
-        {"max_tokens", 4096},
-        {"temperature", 0.7}
+        {"max_tokens", 4096}
     };
 
     // Prepare the network request
@@ -87,7 +61,8 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
             }
         }
         else {
-            emit errorOccurred(QString("Error: %1").arg(reply->errorString()));
+            QString errorDetails = QString("Error: %1\nResponse: %2").arg(reply->errorString(), reply->readAll().constData());
+            emit errorOccurred(errorDetails);
         }
         reply->deleteLater();
     });
@@ -96,24 +71,29 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
 // DatabaseWorker implementation
 DatabaseWorker::DatabaseWorker(const QString &dbPath, QObject *parent) : QObject(parent)
 {
-    db = QSqlDatabase::addDatabase("QSQLITE", "WorkerConnection");
+    qDebug() << "\n=== 🔧 Initializing Database Worker 🔧 ===";
+    qDebug() << "📂 Database path:" << dbPath;
+
+    // Create a unique connection name for this worker
+    QString connectionName = QString("WorkerConnection_%1").arg(reinterpret_cast<quintptr>(QThread::currentThread()));
+    qDebug() << "🔌 Creating database connection:" << connectionName;
+
+    // Remove any existing connection with this name
+    if (QSqlDatabase::contains(connectionName)) {
+        qDebug() << "Removing existing connection:" << connectionName;
+        QSqlDatabase::removeDatabase(connectionName);
+    }
+
+    db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(dbPath);
-    initializeDatabase();
-}
 
-DatabaseWorker::~DatabaseWorker()
-{
-    if (db.isOpen())
-        db.close();
-}
-
-void DatabaseWorker::initializeDatabase()
-{
     if (!db.open()) {
-        emit error("Error opening database: " + db.lastError().text());
+        qDebug() << "❌ Failed to open database:" << db.lastError().text();
         return;
     }
 
+    // Create tables in a single transaction
+    db.transaction();
     QSqlQuery query(db);
     
     // Create chats table
@@ -122,7 +102,8 @@ void DatabaseWorker::initializeDatabase()
                    "name TEXT NOT NULL,"
                    "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
                    ")")) {
-        emit error("Error creating chats table: " + query.lastError().text());
+        qDebug() << "❌ Failed to create chats table:" << query.lastError().text();
+        db.rollback();
         return;
     }
 
@@ -135,44 +116,93 @@ void DatabaseWorker::initializeDatabase()
                    "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
                    "FOREIGN KEY (chat_id) REFERENCES chats(id)"
                    ")")) {
-        emit error("Error creating messages table: " + query.lastError().text());
+        qDebug() << "❌ Failed to create messages table:" << query.lastError().text();
+        db.rollback();
         return;
     }
 
     // Create default chat if it doesn't exist
-    query.prepare("INSERT OR IGNORE INTO chats (id, name) VALUES (?, ?)");
-    query.addBindValue(1);
-    query.addBindValue("Chat 1");
-    if (!query.exec()) {
-        emit error("Error creating default chat: " + query.lastError().text());
+    if (!query.exec("INSERT OR IGNORE INTO chats (id, name) VALUES (1, 'Chat 1')")) {
+        qDebug() << "❌ Failed to create default chat:" << query.lastError().text();
+        db.rollback();
+        return;
     }
+
+    db.commit();
+    qDebug() << "✅ Database initialized successfully";
+}
+
+DatabaseWorker::~DatabaseWorker()
+{
+    QString connectionName = db.connectionName();
+    if (db.isOpen()) {
+        db.close();
+    }
+    db = QSqlDatabase();
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 void DatabaseWorker::saveMessage(int chatId, const QString &role, const QString &content)
 {
+    qDebug() << "\n=== 💾 Saving Message to Database 💾 ===";
+    qDebug() << "🆔 Chat ID:" << chatId;
+    qDebug() << "👤 Role:" << role;
+    qDebug() << "📝 Content:" << content.left(50) + "...";
+
     if (!db.isOpen() && !db.open()) {
-        emit error("Database not open");
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
         return;
     }
 
+    db.transaction();
     QSqlQuery query(db);
+
+    // Insert message
     query.prepare("INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)");
     query.addBindValue(chatId);
     query.addBindValue(role);
     query.addBindValue(content);
-    
+
     if (!query.exec()) {
-        emit error("Error saving message: " + query.lastError().text());
+        QString error = "Error saving message: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        db.rollback();
+        emit this->error(error);
         return;
     }
 
-    emit messageSaved(query.lastInsertId().toLongLong());
+    qint64 id = query.lastInsertId().toLongLong();
+    
+    // Verify the message was saved
+    query.prepare("SELECT * FROM messages WHERE id = ?");
+    query.addBindValue(id);
+    if (query.exec() && query.next()) {
+        qDebug() << "✅ Message saved and verified:";
+        qDebug() << "   ID:" << query.value(0).toLongLong();
+        qDebug() << "   Chat ID:" << query.value(1).toInt();
+        qDebug() << "   Role:" << query.value(2).toString();
+        qDebug() << "   Content:" << query.value(3).toString().left(50) + "...";
+        db.commit();
+        emit messageSaved(id);
+    } else {
+        QString error = "Failed to verify saved message";
+        qDebug() << "❌ " << error;
+        db.rollback();
+        emit this->error(error);
+    }
 }
 
 void DatabaseWorker::loadChatHistory(int chatId)
 {
+    qDebug() << "\n=== 📚 Loading Chat History 📚 ===";
+    qDebug() << "🆔 Chat ID:" << chatId;
+
     if (!db.isOpen() && !db.open()) {
-        emit error("Database not open");
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
         return;
     }
 
@@ -181,18 +211,23 @@ void DatabaseWorker::loadChatHistory(int chatId)
     query.addBindValue(chatId);
     
     if (!query.exec()) {
-        emit error("Error loading chat history: " + query.lastError().text());
+        QString error = "Error loading chat history: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
         return;
     }
 
     QVector<QPair<QString, QString>> messages;
     while (query.next()) {
-        messages.append(qMakePair(
-            query.value(0).toString(),
-            query.value(1).toString()
-        ));
+        QString role = query.value(0).toString();
+        QString content = query.value(1).toString();
+        messages.append(qMakePair(role, content));
+        qDebug() << "📨 Loaded message:";
+        qDebug() << "   Role:" << role;
+        qDebug() << "   Content:" << content.left(50) + "...";
     }
 
+    qDebug() << "✅ Loaded" << messages.size() << "messages from history";
     emit historyLoaded(messages);
 }
 
@@ -201,12 +236,12 @@ DockSigint::DockSigint(QWidget *parent) :
     ui(new Ui::DockSigint),
     currentChatId(1)
 {
-    // Install custom message handler
-    qInstallMessageHandler(messageHandler);
+    qDebug() << "\n=== 🚀 SIGINT Panel Starting Up 🚀 ===";
     
     ui->setupUi(this);
 
     // Initialize web view
+    qDebug() << "🌐 Initializing web view...";
     webView = new QWebEngineView(ui->chatDisplay);
     webView->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, true);
     webView->settings()->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard, true);
@@ -215,8 +250,10 @@ DockSigint::DockSigint(QWidget *parent) :
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(webView);
     ui->chatDisplay->setLayout(layout);
+    qDebug() << "✅ Web view initialized";
 
     // Initialize network worker
+    qDebug() << "🌍 Starting network worker...";
     networkWorker = new NetworkWorker();
     networkWorker->moveToThread(&networkThread);
     connect(&networkThread, &QThread::finished, networkWorker, &QObject::deleteLater);
@@ -224,18 +261,95 @@ DockSigint::DockSigint(QWidget *parent) :
     connect(networkWorker, &NetworkWorker::messageReceived, this, &DockSigint::onWorkerMessageReceived);
     connect(networkWorker, &NetworkWorker::errorOccurred, this, &DockSigint::onWorkerErrorOccurred);
     networkThread.start();
+    qDebug() << "✅ Network worker started";
 
     // Initialize database worker
-    databaseWorker = new DatabaseWorker(getDatabasePath());
+    qDebug() << "💾 Starting database worker...";
+    QString dbPath = getDatabasePath();
+    qDebug() << "📂 Database path:" << dbPath;
+
+    // Test direct database access
+    {
+        // Create a new scope for database objects
+        {
+            QSqlDatabase testDb = QSqlDatabase::addDatabase("QSQLITE", "TestConnection");
+            testDb.setDatabaseName(dbPath);
+            if (testDb.open()) {
+                qDebug() << "🎯 Test database connection successful";
+                // Create a new scope for query
+                {
+                    QSqlQuery query(testDb);
+                    
+                    // Create tables if they don't exist
+                    if (!query.exec("CREATE TABLE IF NOT EXISTS chats ("
+                                  "id INTEGER PRIMARY KEY,"
+                                  "name TEXT NOT NULL,"
+                                  "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                                  ")")) {
+                        qDebug() << "❌ Failed to create chats table:" << query.lastError().text();
+                    }
+                    
+                    if (!query.exec("CREATE TABLE IF NOT EXISTS messages ("
+                                  "id INTEGER PRIMARY KEY,"
+                                  "chat_id INTEGER,"
+                                  "role TEXT NOT NULL,"
+                                  "content TEXT NOT NULL,"
+                                  "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                                  "FOREIGN KEY (chat_id) REFERENCES chats(id)"
+                                  ")")) {
+                        qDebug() << "❌ Failed to create messages table:" << query.lastError().text();
+                    }
+
+                    // Insert test chat
+                    if (!query.exec("INSERT OR IGNORE INTO chats (id, name) VALUES (1, 'Test Chat')")) {
+                        qDebug() << "❌ Failed to insert test chat:" << query.lastError().text();
+                    }
+
+                    // Insert test message
+                    query.prepare("INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)");
+                    query.addBindValue(1);
+                    query.addBindValue("system");
+                    query.addBindValue("🧪 This is a test message from SIGINT initialization");
+                    if (!query.exec()) {
+                        qDebug() << "❌ Failed to insert test message:" << query.lastError().text();
+                    } else {
+                        qDebug() << "✅ Test message inserted with ID:" << query.lastInsertId().toLongLong();
+                    }
+
+                    // Verify the message was saved
+                    if (!query.exec("SELECT * FROM messages ORDER BY id DESC LIMIT 1")) {
+                        qDebug() << "❌ Failed to verify test message:" << query.lastError().text();
+                    } else if (query.next()) {
+                        qDebug() << "✅ Last message in database:";
+                        qDebug() << "   ID:" << query.value(0).toLongLong();
+                        qDebug() << "   Chat ID:" << query.value(1).toInt();
+                        qDebug() << "   Role:" << query.value(2).toString();
+                        qDebug() << "   Content:" << query.value(3).toString();
+                    }
+                } // query goes out of scope here
+                testDb.close();
+            } else {
+                qDebug() << "❌ Test database connection failed:" << testDb.lastError().text();
+            }
+        } // testDb goes out of scope here
+        QSqlDatabase::removeDatabase("TestConnection");
+    }
+
+    databaseWorker = new DatabaseWorker(dbPath);
     databaseWorker->moveToThread(&databaseThread);
     connect(&databaseThread, &QThread::finished, databaseWorker, &QObject::deleteLater);
     connect(this, &DockSigint::saveMessageToDb, databaseWorker, &DatabaseWorker::saveMessage);
     connect(this, &DockSigint::loadHistoryFromDb, databaseWorker, &DatabaseWorker::loadChatHistory);
     connect(databaseWorker, &DatabaseWorker::messageSaved, this, [this](qint64 id) {
+        qDebug() << "✅ Message saved with ID:" << id;
         if (!messageHistory.isEmpty())
             messageHistory.last().id = id;
     });
+    connect(databaseWorker, &DatabaseWorker::error, this, [](const QString &error) {
+        qDebug() << "❌ Database worker error:" << error;
+    });
     connect(databaseWorker, &DatabaseWorker::historyLoaded, this, [this](const QVector<QPair<QString, QString>> &messages) {
+        qDebug() << "📚 Loading" << messages.size() << "messages into view";
         messageHistory.clear();
         for (const auto &msg : messages) {
             Message newMsg;
@@ -247,6 +361,7 @@ DockSigint::DockSigint(QWidget *parent) :
         }
     });
     databaseThread.start();
+    qDebug() << "✅ Database worker started";
 
     // Connect signals/slots
     connect(ui->sendButton, &QPushButton::clicked, this, &DockSigint::onSendClicked);
@@ -561,6 +676,10 @@ void DockSigint::updateChatView()
 
 void DockSigint::appendMessage(const QString &message, bool isUser)
 {
+    qDebug() << "\n=== Appending Message ===";
+    qDebug() << "Is User:" << isUser;
+    qDebug() << "Content:" << message.left(50) + "...";
+
     Message msg;
     msg.id = -1;
     msg.role = isUser ? "user" : "assistant";
@@ -570,10 +689,13 @@ void DockSigint::appendMessage(const QString &message, bool isUser)
     messageHistory.append(msg);
     
     // Save to database asynchronously
+    qDebug() << "Sending save message request to worker thread";
     emit saveMessageToDb(currentChatId, msg.role, msg.content);
     
     // Update view asynchronously
+    qDebug() << "Updating view";
     appendMessageToView(msg.content, isUser);
+    qDebug() << "=================================\n";
 }
 
 void DockSigint::appendMessageToView(const QString &message, bool isUser)
@@ -604,16 +726,22 @@ void DockSigint::sendToClaude(const QString &message)
         return;
     }
 
-    // Prepare the messages array
+    // Prepare the messages array with proper format
     QJsonArray messages;
     for (const auto &msg : messageHistory) {
         messages.append(QJsonObject{
-            {"role", msg.role},
+            {"role", msg.role == "user" ? "user" : "assistant"},
             {"content", msg.content}
         });
     }
 
-    // Send message to worker thread
+    // Add the current message
+    messages.append(QJsonObject{
+        {"role", "user"},
+        {"content", message}
+    });
+
+    qDebug() << "Message history size:" << messages.size();
     emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
 }
 

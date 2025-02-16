@@ -28,6 +28,13 @@
 #include <QString>
 #include <QStringList>
 #include <QtGlobal>
+#include <QDebug>
+#include <QPalette>
+#include <QSettings>
+#include <QVector>
+#include <QPair>
+#include <QDateTime>
+#include <QTextStream>
 
 #ifdef WITH_PORTAUDIO
 #include <portaudio.h>
@@ -45,8 +52,75 @@
 static void reset_conf(const QString &file_name);
 static void list_conf();
 
+// Global file for logging
+static QFile *logFile = nullptr;
+static QTextStream *logStream = nullptr;
+
+// Custom message handler for SIGINT panel
+void sigintMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
+{
+    // Force stderr to flush
+    fflush(stderr);
+
+    // Get timestamp
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
+    
+    // Format message
+    QString txt = QString("[%1] %2: %3").arg(timestamp);
+    
+    switch (type) {
+    case QtDebugMsg:
+        txt = txt.arg("Debug").arg(msg);
+        fprintf(stderr, "SIGINT Debug [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
+        break;
+    case QtInfoMsg:
+        txt = txt.arg("Info").arg(msg);
+        fprintf(stderr, "SIGINT Info [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
+        break;
+    case QtWarningMsg:
+        txt = txt.arg("Warning").arg(msg);
+        fprintf(stderr, "SIGINT Warning [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
+        break;
+    case QtCriticalMsg:
+        txt = txt.arg("Critical").arg(msg);
+        fprintf(stderr, "SIGINT Critical [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
+        break;
+    case QtFatalMsg:
+        txt = txt.arg("Fatal").arg(msg);
+        fprintf(stderr, "SIGINT Fatal [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
+        break;
+    }
+
+    // Also log to file
+    if (logStream)
+    {
+        *logStream << txt << Qt::endl;
+        logStream->flush();
+    }
+
+    // Force stderr to flush again
+    fflush(stderr);
+}
+
 int main(int argc, char *argv[])
 {
+    // Set up logging file
+    QString logPath = QDir::homePath() + "/.config/gqrx/sigint.log";
+    logFile = new QFile(logPath);
+    if (logFile->open(QIODevice::WriteOnly | QIODevice::Append))
+    {
+        logStream = new QTextStream(logFile);
+        *logStream << "\n=== Starting GQRX SIGINT at " 
+                  << QDateTime::currentDateTime().toString()
+                  << " ===\n" << Qt::endl;
+    }
+
+    // Register custom message handler
+    qInstallMessageHandler(sigintMessageHandler);
+
+    // Register types for queuing between threads
+    qRegisterMetaType<QVector<QPair<QString, QString>>>("QVector<QPair<QString,QString>>");
+
     QString         cfg_file;
     bool            edit_conf = false;
     int             return_code = 0;
@@ -179,6 +253,19 @@ int main(int argc, char *argv[])
 #ifdef WITH_PORTAUDIO
     Pa_Terminate();
 #endif
+
+    // Clean up logging
+    if (logStream)
+    {
+        delete logStream;
+        logStream = nullptr;
+    }
+    if (logFile)
+    {
+        logFile->close();
+        delete logFile;
+        logFile = nullptr;
+    }
 
     return return_code;
 }
