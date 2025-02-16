@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="24" height="24" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Main body and wings -->
+  <path d="M12 3L6 9L12 15L18 9L12 3Z" fill="#569CD6"/>
+  <!-- Head -->
+  <path d="M12 2L11 4L12 5L13 4L12 2Z" fill="#569CD6"/>
+  <!-- Tail -->
+  <path d="M10 15L12 21L14 15L12 17L10 15Z" fill="#569CD6"/>
+  <!-- Eye -->
+  <circle cx="12" cy="4" r="0.5" fill="white"/>
+  <!-- Signal waves -->
+  <path d="M4 8C7 8 9 10 9 13" stroke="#569CD6" stroke-width="1.5" opacity="0.8"/>
+  <path d="M20 8C17 8 15 10 15 13" stroke="#569CD6" stroke-width="1.5" opacity="0.8"/>
+</svg> 

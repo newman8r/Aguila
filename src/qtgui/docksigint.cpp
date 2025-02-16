@@ -14,6 +14,7 @@
 #include <QSqlQuery>
 #include <QSqlError>
 #include <QThread>
+#include <QIcon>
 #include "docksigint.h"
 #include "ui_docksigint.h"
 
@@ -240,6 +241,9 @@ DockSigint::DockSigint(QWidget *parent) :
     
     ui->setupUi(this);
 
+    // Set icon explicitly
+    setWindowIcon(QIcon(":/icons/icons/eagle.svg"));
+
     // Initialize web view
     qDebug() << "🌐 Initializing web view...";
     webView = new QWebEngineView(ui->chatDisplay);
@@ -303,28 +307,6 @@ DockSigint::DockSigint(QWidget *parent) :
                     // Insert test chat
                     if (!query.exec("INSERT OR IGNORE INTO chats (id, name) VALUES (1, 'Test Chat')")) {
                         qDebug() << "❌ Failed to insert test chat:" << query.lastError().text();
-                    }
-
-                    // Insert test message
-                    query.prepare("INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)");
-                    query.addBindValue(1);
-                    query.addBindValue("system");
-                    query.addBindValue("🧪 This is a test message from SIGINT initialization");
-                    if (!query.exec()) {
-                        qDebug() << "❌ Failed to insert test message:" << query.lastError().text();
-                    } else {
-                        qDebug() << "✅ Test message inserted with ID:" << query.lastInsertId().toLongLong();
-                    }
-
-                    // Verify the message was saved
-                    if (!query.exec("SELECT * FROM messages ORDER BY id DESC LIMIT 1")) {
-                        qDebug() << "❌ Failed to verify test message:" << query.lastError().text();
-                    } else if (query.next()) {
-                        qDebug() << "✅ Last message in database:";
-                        qDebug() << "   ID:" << query.value(0).toLongLong();
-                        qDebug() << "   Chat ID:" << query.value(1).toInt();
-                        qDebug() << "   Role:" << query.value(2).toString();
-                        qDebug() << "   Content:" << query.value(3).toString();
                     }
                 } // query goes out of scope here
                 testDb.close();
@@ -402,8 +384,7 @@ DockSigint::DockSigint(QWidget *parent) :
             // Load chat history
             emit loadHistoryFromDb(currentChatId);
             if (messageHistory.isEmpty()) {
-                appendMessage("Welcome to the SIGINT Chat Interface!", false);
-                appendMessage("Connected to: " + currentModel, false);
+                appendMessage("🦅 Welcome to the Aguila SIGINT platform. Claude has the helm.", false);
             }
         }
     });
