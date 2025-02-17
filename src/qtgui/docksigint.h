@@ -2,6 +2,7 @@
 #define DOCKSIGINT_H
 
 #include "spectrum_capture.h"
+#include "spectrum_visualizer.h"
 #include "../applications/gqrx/receiver.h"
 #include <QDockWidget>
 #include <QSettings>
@@ -131,8 +132,9 @@ private:
     QVector<Chat> chatList;
     QString chatHtml;
     
-    // Spectrum capture
+    // Spectrum capture and visualization
     std::unique_ptr<SpectrumCapture> spectrumCapture;
+    SpectrumVisualizer *spectrumVisualizer;
 
     receiver *rx_ptr;
     bool dsp_running;  // Track DSP state locally

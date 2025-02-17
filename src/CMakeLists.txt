@@ -7,7 +7,7 @@ add_subdirectory(qtgui)
 add_subdirectory(receivers)
 
 # Add src directory to include path
-include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/qtgui)
 
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     if(${OSX_AUDIO_BACKEND} MATCHES "Portaudio")

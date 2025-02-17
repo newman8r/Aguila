@@ -361,6 +361,21 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
             this, &DockSigint::onCaptureProgress);
     qDebug() << "✅ Spectrum capture initialized";
 
+    // Initialize spectrum visualizer
+    spectrumVisualizer = ui->spectrumVisualizer;
+    
+    // Connect capture signals to visualizer
+    connect(spectrumCapture.get(), &SpectrumCapture::captureComplete,
+            this, [this](const SpectrumCapture::CaptureResult& result) {
+        if (result.success) {
+            double bandwidth = result.range.end_freq - result.range.start_freq;
+            spectrumVisualizer->updateData(result.fft_data,
+                                         result.range.start_freq + bandwidth/2,
+                                         bandwidth,
+                                         result.range.sample_rate);
+        }
+    });
+
     // Test direct database access
     {
         // Create a new scope for database objects

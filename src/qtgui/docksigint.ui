@@ -250,14 +250,34 @@
      </widget>
     </item>
     <item>
-     <widget class="QWidget" name="chatDisplay">
-      <property name="styleSheet">
-       <string notr="true">QWidget {
-         background-color: #1e1e1e;
-         border: 1px solid #2d2d2d;
-         border-radius: 4px;
-       }</string>
+     <widget class="QSplitter" name="mainSplitter">
+      <property name="orientation">
+       <enum>Qt::Vertical</enum>
       </property>
+      <widget class="SpectrumVisualizer" name="spectrumVisualizer">
+       <property name="minimumSize">
+        <size>
+         <width>0</width>
+         <height>200</height>
+        </size>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QWidget {
+          background-color: #1e1e1e;
+          border: 1px solid #2d2d2d;
+          border-radius: 4px;
+        }</string>
+       </property>
+      </widget>
+      <widget class="QWidget" name="chatDisplay">
+       <property name="styleSheet">
+        <string notr="true">QWidget {
+          background-color: #1e1e1e;
+          border: 1px solid #2d2d2d;
+          border-radius: 4px;
+        }</string>
+       </property>
+      </widget>
      </widget>
     </item>
     <item>
@@ -305,6 +325,13 @@
    </layout>
   </widget>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>SpectrumVisualizer</class>
+   <extends>QWidget</extends>
+   <header>spectrum_visualizer.h</header>
+  </customwidget>
+ </customwidgets>
  <resources>
   <include location="../../resources/icons.qrc"/>
  </resources>

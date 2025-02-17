@@ -36,6 +36,8 @@ add_source_files(SRCS_LIST
 	docksigint.h
 	spectrum_capture.cpp
 	spectrum_capture.h
+	spectrum_visualizer.cpp
+	spectrum_visualizer.h
 	dxc_options.cpp
 	dxc_options.h
 	dxc_spots.cpp
