@@ -15,6 +15,9 @@
 #include <QSqlError>
 #include <QThread>
 #include <QIcon>
+#include <QShortcut>
+#include <QAction>
+#include "../applications/gqrx/mainwindow.h"
 #include "docksigint.h"
 #include "ui_docksigint.h"
 
@@ -297,14 +300,22 @@ void DatabaseWorker::createChat(const QString &name)
     emit chatCreated(chatId, name);
 }
 
-DockSigint::DockSigint(QWidget *parent) :
+DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     QDockWidget(parent),
     ui(new Ui::DockSigint),
-    currentChatId(1)
+    currentChatId(1),
+    rx_ptr(rx_ptr),
+    dsp_running(false)  // Initialize DSP state
 {
     qDebug() << "\n=== 🚀 SIGINT Panel Starting Up 🚀 ===";
     
     ui->setupUi(this);
+
+    // Connect to DSP state changes
+    if (auto *mainWindow = qobject_cast<MainWindow*>(parent)) {
+        connect(mainWindow, &MainWindow::dspStateChanged, 
+                this, &DockSigint::onDspStateChanged);
+    }
 
     // Set icon explicitly
     setWindowIcon(QIcon(":/icons/icons/eagle.svg"));
@@ -336,6 +347,19 @@ DockSigint::DockSigint(QWidget *parent) :
     qDebug() << "💾 Starting database worker...";
     QString dbPath = getDatabasePath();
     qDebug() << "📂 Database path:" << dbPath;
+
+    // Initialize spectrum capture
+    qDebug() << "📡 Initializing spectrum capture...";
+    spectrumCapture = std::make_unique<SpectrumCapture>(rx_ptr);
+    connect(spectrumCapture.get(), &SpectrumCapture::captureStarted, 
+            this, &DockSigint::onCaptureStarted);
+    connect(spectrumCapture.get(), &SpectrumCapture::captureComplete,
+            this, &DockSigint::onCaptureComplete);
+    connect(spectrumCapture.get(), &SpectrumCapture::captureError,
+            this, &DockSigint::onCaptureError);
+    connect(spectrumCapture.get(), &SpectrumCapture::progressUpdate,
+            this, &DockSigint::onCaptureProgress);
+    qDebug() << "✅ Spectrum capture initialized";
 
     // Test direct database access
     {
@@ -470,6 +494,10 @@ DockSigint::DockSigint(QWidget *parent) :
     connect(ui->newChatButton, &QPushButton::clicked, this, &DockSigint::onNewChatClicked);
     connect(ui->chatSelector, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &DockSigint::onChatSelected);
+
+    // Add spectrum capture test shortcut
+    auto *captureShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
+    connect(captureShortcut, &QShortcut::activated, this, &DockSigint::testSpectrumCapture);
 
     // Load existing chats
     databaseWorker->loadAllChats();
@@ -890,4 +918,132 @@ void DockSigint::onChatsLoaded(const QVector<QPair<int, QString>> &chats)
         chatList.append(newChat);
     }
     updateChatSelector();
+}
+
+void DockSigint::onCaptureStarted(const SpectrumCapture::CaptureRange& range)
+{
+    qDebug() << "Starting spectrum capture:" 
+             << range.start_freq << "Hz to" 
+             << range.end_freq << "Hz";
+    
+    QString message = QString("📡 Starting spectrum capture from %1 MHz to %2 MHz...")
+                     .arg(range.start_freq / 1e6, 0, 'f', 3)
+                     .arg(range.end_freq / 1e6, 0, 'f', 3);
+    appendMessage(message, false);
+}
+
+void DockSigint::onCaptureComplete(const SpectrumCapture::CaptureResult& result)
+{
+    if (result.success) {
+        qDebug() << "Capture complete:" << result.fft_data.size() << "samples";
+        
+        // Phase 1A - Basic FFT Data Capture
+        QString message = QString("✅ Phase 1A Capture Complete\n\n");
+        message += QString("📊 Captured %1 FFT samples\n").arg(result.fft_data.size());
+        message += QString("📡 Center Frequency: %1 MHz\n")
+                  .arg((result.range.start_freq + result.range.end_freq) / 2e6, 0, 'f', 3);
+        message += QString("📐 Bandwidth: %1 MHz\n")
+                  .arg((result.range.end_freq - result.range.start_freq) / 1e6, 0, 'f', 3);
+        message += QString("⚡ Sample Rate: %1 MHz\n")
+                  .arg(result.range.sample_rate / 1e6, 0, 'f', 3);
+        message += QString("🔍 Resolution: %1 kHz/bin\n")
+                  .arg(result.range.sample_rate / result.range.fft_size / 1e3, 0, 'f', 2);
+        message += QString("⏱️ Timestamp: %1")
+                  .arg(QDateTime::fromMSecsSinceEpoch(result.timestamp * 1000)
+                       .toString("yyyy-MM-dd HH:mm:ss.zzz"));
+        
+        appendMessage(message, false);
+        
+        // TODO: Phase 1B - Add FFT data visualization
+        // TODO: Phase 1C - Add signal detection and analysis
+    }
+}
+
+void DockSigint::onCaptureError(const std::string& error)
+{
+    qDebug() << "Capture error:" << QString::fromStdString(error);
+    QString message = QString("❌ Capture failed: %1")
+                     .arg(QString::fromStdString(error));
+    appendMessage(message, false);
+}
+
+void DockSigint::onCaptureProgress(int percent)
+{
+    qDebug() << "Capture progress:" << percent << "%";
+    // TODO: Add progress indicator to UI
+}
+
+void DockSigint::testSpectrumCapture()
+{
+    qDebug() << "\n=== 🔍 Starting Spectrum Capture Test ===";
+    qDebug() << "Receiver pointer:" << (rx_ptr ? "Valid" : "Null");
+    qDebug() << "DSP running:" << dsp_running;
+
+    if (!rx_ptr) {
+        qDebug() << "❌ Error: No receiver available";
+        appendMessage("❌ Error: No receiver available", false);
+        return;
+    }
+
+    // Check if DSP is running using our locally tracked state
+    if (!dsp_running) {
+        qDebug() << "❌ Error: DSP not running";
+        appendMessage("❌ Error: DSP is not running. Please start DSP first (click the power button).", false);
+        return;
+    }
+
+    qDebug() << "🎯 Getting current parameters...";
+    // Create a test range around current frequency
+    double center_freq = spectrumCapture->getCurrentCenterFreq();
+    double sample_rate = spectrumCapture->getCurrentSampleRate();
+    
+    qDebug() << "Center frequency:" << center_freq << "Hz";
+    qDebug() << "Sample rate:" << sample_rate << "Hz";
+    
+    if (center_freq == 0 || sample_rate == 0) {
+        qDebug() << "❌ Error: Invalid frequency or sample rate";
+        appendMessage("❌ Error: Invalid frequency or sample rate", false);
+        return;
+    }
+    
+    qDebug() << "📊 Creating capture range...";
+    SpectrumCapture::CaptureRange range {
+        .start_freq = center_freq - (sample_rate / 4),  // Start 1/4 bandwidth below center
+        .end_freq = center_freq + (sample_rate / 4),    // End 1/4 bandwidth above center
+        .fft_size = 4096,
+        .sample_rate = sample_rate
+    };
+
+    qDebug() << "Range parameters:";
+    qDebug() << "- Start freq:" << range.start_freq << "Hz";
+    qDebug() << "- End freq:" << range.end_freq << "Hz";
+    qDebug() << "- FFT size:" << range.fft_size;
+    qDebug() << "- Sample rate:" << range.sample_rate << "Hz";
+
+    qDebug() << "🚀 Attempting capture...";
+    // Attempt capture
+    try {
+        spectrumCapture->captureRange(range);
+        qDebug() << "✅ Capture initiated successfully";
+    }
+    catch (const std::exception& e) {
+        qDebug() << "❌ Exception during capture:" << e.what();
+        appendMessage(QString("❌ Error during capture: %1").arg(e.what()), false);
+    }
+    catch (...) {
+        qDebug() << "❌ Unknown exception during capture";
+        appendMessage("❌ Unknown error during capture", false);
+    }
+    
+    qDebug() << "=== Test Complete ===\n";
+}
+
+void DockSigint::onDspStateChanged(bool running)
+{
+    dsp_running = running;
+    if (running) {
+        appendMessage("✅ DSP started", false);
+    } else {
+        appendMessage("❌ DSP stopped", false);
+    }
 } 

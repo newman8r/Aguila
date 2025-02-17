@@ -6,6 +6,9 @@ add_subdirectory(interfaces)
 add_subdirectory(qtgui)
 add_subdirectory(receivers)
 
+# Add src directory to include path
+include_directories(${CMAKE_CURRENT_SOURCE_DIR})
+
 if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
     if(${OSX_AUDIO_BACKEND} MATCHES "Portaudio")
         add_subdirectory(portaudio)

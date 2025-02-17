@@ -72,6 +72,9 @@ public slots:
     void setMarkerB(qint64 freq);
     void enableMarkers(bool enable);
 
+signals:
+    void dspStateChanged(bool running);  // Add signal declaration here
+
 private:
     Ui::MainWindow *ui;
 

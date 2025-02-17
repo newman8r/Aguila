@@ -150,7 +150,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     uiDockAudio = new DockAudio();
     uiDockInputCtl = new DockInputCtl();
     uiDockFft = new DockFft();
-    uiDockSigint = new DockSigint();
+    uiDockSigint = new DockSigint(rx, this);
     BandPlan::Get().setConfigDir(m_cfg_dir);
     Bookmarks::Get().setConfigDir(m_cfg_dir);
     BandPlan::Get().load();
@@ -1990,7 +1990,7 @@ void MainWindow::on_actionDSP_triggered(bool checked)
     }
 
     ui->actionDSP->setChecked(checked); //for remote control
-
+    emit dspStateChanged(checked);  // Emit our new signal
 }
 
 /**

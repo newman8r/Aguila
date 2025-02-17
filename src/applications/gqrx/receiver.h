@@ -218,6 +218,7 @@ public:
 
     bool        is_recording_audio(void) const { return d_recording_wav; }
     bool        is_snifffer_active(void) const { return d_sniffer_active; }
+    bool        is_running(void) const { return d_running; }
 
     /* rds functions */
     void        get_rds_data(std::string &outbuff, int &num);

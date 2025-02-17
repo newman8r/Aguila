@@ -1,6 +1,8 @@
 #ifndef DOCKSIGINT_H
 #define DOCKSIGINT_H
 
+#include "spectrum_capture.h"
+#include "../applications/gqrx/receiver.h"
 #include <QDockWidget>
 #include <QSettings>
 #include <QNetworkAccessManager>
@@ -13,6 +15,7 @@
 #include <QSqlDatabase>
 #include <QThread>
 #include <QDateTime>
+#include <memory>
 
 // Worker class for network operations
 class NetworkWorker : public QObject
@@ -71,7 +74,7 @@ class DockSigint : public QDockWidget
     Q_OBJECT
 
 public:
-    explicit DockSigint(QWidget *parent = nullptr);
+    explicit DockSigint(receiver *rx_ptr, QWidget *parent = nullptr);
     ~DockSigint();
 
     void saveSettings(QSettings *settings);
@@ -82,6 +85,10 @@ signals:
     void saveMessageToDb(int chatId, const QString &role, const QString &content);
     void loadHistoryFromDb(int chatId);
 
+public slots:
+    void onReceiverDestroyed() { rx_ptr = nullptr; }
+    void onDspStateChanged(bool running);
+
 private slots:
     void onSendClicked();
     void onReturnPressed();
@@ -90,6 +97,13 @@ private slots:
     void onNewChatClicked();
     void onChatSelected(int index);
     void onChatsLoaded(const QVector<QPair<int, QString>> &chats);
+    
+    // Spectrum capture slots
+    void onCaptureStarted(const SpectrumCapture::CaptureRange& range);
+    void onCaptureComplete(const SpectrumCapture::CaptureResult& result);
+    void onCaptureError(const std::string& error);
+    void onCaptureProgress(int percent);
+    void testSpectrumCapture();  // Test function
 
 private:
     struct Message {
@@ -116,6 +130,12 @@ private:
     QVector<Message> messageHistory;
     QVector<Chat> chatList;
     QString chatHtml;
+    
+    // Spectrum capture
+    std::unique_ptr<SpectrumCapture> spectrumCapture;
+
+    receiver *rx_ptr;
+    bool dsp_running;  // Track DSP state locally
 
     void loadEnvironmentVariables();
     QString getBaseHtml();
