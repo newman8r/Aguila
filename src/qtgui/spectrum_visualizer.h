@@ -1,7 +1,6 @@
 #ifndef SPECTRUM_VISUALIZER_H
 #define SPECTRUM_VISUALIZER_H
 
-#include <QWidget>
 #include <QOpenGLWidget>
 #include <QOpenGLFunctions>
 #include <QOpenGLBuffer>
@@ -9,10 +8,7 @@
 #include <QVector>
 #include <QVector3D>
 #include <QPainter>
-#include <QTimer>
 #include <memory>
-
-#include "spectrum_capture.h"
 
 class SpectrumVisualizer : public QOpenGLWidget, protected QOpenGLFunctions
 {
@@ -56,10 +52,7 @@ private:
     bool m_initialized;
 
     // Helper functions
-    void initializeShaders();
     void updateVertices();
-    void drawSpectrum(QPainter& painter);
-    void drawGrid(QPainter& painter);
     void drawLabels(QPainter& painter);
 };
 

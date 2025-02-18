@@ -7,35 +7,51 @@
 
 SpectrumVisualizer::SpectrumVisualizer(QWidget *parent)
     : QOpenGLWidget(parent)
-    , m_scale(1.0f)
+    , m_scale(2.5f)  // Increased from 1.0f for better peak visibility
     , m_offset(0.0f)
     , m_initialized(false)
 {
-    // Set widget attributes for proper rendering
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAutoFillBackground(false);
-    
-    // Enable mouse tracking for future interaction
-    setMouseTracking(true);
 }
 
-SpectrumVisualizer::~SpectrumVisualizer()
-{
-    // Clean up OpenGL resources
-    if (m_initialized) {
-        makeCurrent();
-        m_vbo.destroy();
-        doneCurrent();
-    }
-}
+SpectrumVisualizer::~SpectrumVisualizer() = default;
 
 void SpectrumVisualizer::initializeGL()
 {
     initializeOpenGLFunctions();
-    glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
     
-    // Initialize shaders
-    initializeShaders();
+    // Set a nicer background color
+    glClearColor(0.16f, 0.16f, 0.18f, 1.0f);  // Slightly bluish dark
+    
+    // Initialize shaders with enhanced visuals
+    const char *vertexShaderSource = R"(
+        attribute vec3 vertex;
+        attribute vec3 color;
+        varying vec3 vert_color;
+        varying float v_intensity;
+        uniform mat4 matrix;
+        void main() {
+            gl_Position = matrix * vec4(vertex, 1.0);
+            v_intensity = vertex.y;  // Pass height for intensity
+            vert_color = color;
+        }
+    )";
+    
+    const char *fragmentShaderSource = R"(
+        varying vec3 vert_color;
+        varying float v_intensity;
+        void main() {
+            // Enhanced color calculation
+            vec3 baseColor = vec3(0.4, 0.7, 1.0);  // Brighter blue
+            vec3 finalColor = mix(baseColor * 0.3, baseColor, v_intensity);
+            gl_FragColor = vec4(finalColor, 0.9);
+        }
+    )";
+    
+    m_program.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource);
+    m_program.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource);
+    m_program.link();
     
     // Set up vertex buffer
     m_vbo.create();
@@ -47,21 +63,100 @@ void SpectrumVisualizer::initializeGL()
 
 void SpectrumVisualizer::paintGL()
 {
+    if (!m_initialized)
+        return;
+
+    // Clear and prepare OpenGL state
+    glClear(GL_COLOR_BUFFER_BIT);
+    
+    // Render spectrum data using OpenGL
+    if (!m_data.magnitudes.isEmpty()) {
+        m_program.bind();
+        
+        // Set up transformation matrix (identity for now)
+        QMatrix4x4 matrix;
+        m_program.setUniformValue("matrix", matrix);
+        
+        // Set up vertex attributes
+        m_vbo.bind();
+        int vertexLocation = m_program.attributeLocation("vertex");
+        m_program.enableAttributeArray(vertexLocation);
+        m_program.setAttributeBuffer(vertexLocation, GL_FLOAT, 0, 3, sizeof(QVector3D));
+        
+        int colorLocation = m_program.attributeLocation("color");
+        m_program.enableAttributeArray(colorLocation);
+        m_program.setAttributeBuffer(colorLocation, GL_FLOAT, m_vertices.size() * sizeof(QVector3D), 3, sizeof(QVector3D));
+        
+        // Draw the spectrum
+        glDrawArrays(GL_LINE_STRIP, 0, m_vertices.size());
+        
+        // Clean up
+        m_program.disableAttributeArray(vertexLocation);
+        m_program.disableAttributeArray(colorLocation);
+        m_program.release();
+    }
+    
+    // Overlay grid and labels using QPainter
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     
-    // Clear background
-    painter.fillRect(rect(), QColor(30, 30, 30));
+    // Draw subtle grid
+    painter.setPen(QPen(QColor(70, 70, 80, 80), 1, Qt::SolidLine));
     
-    // Draw visualization elements
-    drawGrid(painter);
-    drawSpectrum(painter);
+    const int width = this->width();
+    const int height = this->height();
+    
+    // Vertical grid lines
+    for (int x = 0; x <= width; x += width/10) {
+        painter.drawLine(x, 0, x, height);
+    }
+    
+    // Horizontal grid lines
+    for (int y = 0; y <= height; y += height/8) {
+        painter.drawLine(0, y, width, y);
+    }
+    
+    // Draw labels last (on top)
     drawLabels(painter);
+    
+    painter.end();
 }
 
 void SpectrumVisualizer::resizeGL(int w, int h)
 {
     glViewport(0, 0, w, h);
+    update();  // Request a repaint with new size
+}
+
+void SpectrumVisualizer::updateVertices()
+{
+    if (!m_initialized || m_data.magnitudes.isEmpty())
+        return;
+        
+    const int numPoints = m_data.magnitudes.size();
+    m_vertices.resize(numPoints);
+    m_colors.resize(numPoints);
+    
+    // Convert FFT data to vertices with enhanced scaling
+    for (int i = 0; i < numPoints; ++i) {
+        float x = (float)i / numPoints * 2.0f - 1.0f;
+        float y = m_data.magnitudes[i] * m_scale + m_offset;
+        
+        m_vertices[i] = QVector3D(x, y, 0.0f);
+        
+        // Enhanced color gradient
+        float intensity = (y + 1.0f) / 2.0f;
+        m_colors[i] = QVector3D(0.4f + intensity * 0.6f,  // More blue
+                               0.7f + intensity * 0.3f,  // More vibrant
+                               1.0f);                    // Full blue base
+    }
+    
+    // Update VBO efficiently
+    m_vbo.bind();
+    m_vbo.allocate(numPoints * sizeof(QVector3D) * 2);
+    m_vbo.write(0, m_vertices.constData(), numPoints * sizeof(QVector3D));
+    m_vbo.write(numPoints * sizeof(QVector3D), m_colors.constData(), 
+                numPoints * sizeof(QVector3D));
 }
 
 void SpectrumVisualizer::updateData(const std::vector<float>& fft_data,
@@ -81,126 +176,6 @@ void SpectrumVisualizer::updateData(const std::vector<float>& fft_data,
     
     // Request redraw
     update();
-}
-
-void SpectrumVisualizer::initializeShaders()
-{
-    // Basic shader for 2D visualization
-    const char *vertexShaderSource = R"(
-        attribute vec3 vertex;
-        attribute vec3 color;
-        varying vec3 vert_color;
-        uniform mat4 matrix;
-        void main() {
-            gl_Position = matrix * vec4(vertex, 1.0);
-            vert_color = color;
-        }
-    )";
-    
-    const char *fragmentShaderSource = R"(
-        varying vec3 vert_color;
-        void main() {
-            gl_FragColor = vec4(vert_color, 1.0);
-        }
-    )";
-    
-    if (!m_program.addShaderFromSourceCode(QOpenGLShader::Vertex, vertexShaderSource))
-        qDebug() << "Failed to compile vertex shader";
-        
-    if (!m_program.addShaderFromSourceCode(QOpenGLShader::Fragment, fragmentShaderSource))
-        qDebug() << "Failed to compile fragment shader";
-        
-    if (!m_program.link())
-        qDebug() << "Failed to link shader program";
-}
-
-void SpectrumVisualizer::updateVertices()
-{
-    if (!m_initialized || m_data.magnitudes.isEmpty())
-        return;
-        
-    const int numPoints = m_data.magnitudes.size();
-    m_vertices.resize(numPoints);
-    m_colors.resize(numPoints);
-    
-    // Convert FFT data to vertices
-    for (int i = 0; i < numPoints; ++i) {
-        float x = (float)i / numPoints * 2.0f - 1.0f;
-        float y = m_data.magnitudes[i] * m_scale + m_offset;
-        
-        m_vertices[i] = QVector3D(x, y, 0.0f);
-        
-        // Color based on magnitude
-        float intensity = (y + 1.0f) / 2.0f;
-        m_colors[i] = QVector3D(0.2f + intensity * 0.8f,
-                               0.5f + intensity * 0.5f,
-                               0.8f + intensity * 0.2f);
-    }
-    
-    // Update VBO
-    m_vbo.bind();
-    m_vbo.allocate(numPoints * sizeof(QVector3D) * 2);
-    m_vbo.write(0, m_vertices.constData(), numPoints * sizeof(QVector3D));
-    m_vbo.write(numPoints * sizeof(QVector3D), m_colors.constData(), 
-                numPoints * sizeof(QVector3D));
-}
-
-void SpectrumVisualizer::drawSpectrum(QPainter& painter)
-{
-    if (!m_initialized || m_data.magnitudes.isEmpty())
-        return;
-        
-    const int width = this->width();
-    const int height = this->height();
-    
-    // Set up path for spectrum line
-    QPainterPath path;
-    const int numPoints = m_data.magnitudes.size();
-    
-    for (int i = 0; i < numPoints; ++i) {
-        float x = (float)i / numPoints * width;
-        float y = height - (m_data.magnitudes[i] * m_scale + m_offset) * height;
-        
-        if (i == 0)
-            path.moveTo(x, y);
-        else
-            path.lineTo(x, y);
-    }
-    
-    // Draw spectrum
-    painter.setPen(QPen(QColor(86, 156, 214), 1.5));
-    painter.drawPath(path);
-    
-    // Fill area under curve
-    QLinearGradient gradient(0, 0, 0, height);
-    gradient.setColorAt(0, QColor(86, 156, 214, 100));
-    gradient.setColorAt(1, QColor(86, 156, 214, 10));
-    
-    QPainterPath fillPath = path;
-    fillPath.lineTo(width, height);
-    fillPath.lineTo(0, height);
-    fillPath.closeSubpath();
-    
-    painter.fillPath(fillPath, gradient);
-}
-
-void SpectrumVisualizer::drawGrid(QPainter& painter)
-{
-    const int width = this->width();
-    const int height = this->height();
-    
-    // Draw grid lines
-    painter.setPen(QPen(QColor(60, 60, 60), 1, Qt::SolidLine));
-    
-    // Vertical lines
-    for (int x = 0; x <= width; x += width/10) {
-        painter.drawLine(x, 0, x, height);
-    }
-    
-    // Horizontal lines
-    for (int y = 0; y <= height; y += height/8) {
-        painter.drawLine(0, y, width, y);
-    }
 }
 
 void SpectrumVisualizer::drawLabels(QPainter& painter)
