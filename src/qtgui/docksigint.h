@@ -12,6 +12,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QWebEngineView>
+#include <QWebEnginePage>
 #include <QWebChannel>
 #include <QSqlDatabase>
 #include <QThread>
@@ -105,6 +106,7 @@ private slots:
     void onCaptureError(const std::string& error);
     void onCaptureProgress(int percent);
     void testSpectrumCapture();  // Test function
+    void onTabChanged(const QString &tabName);  // Add this new slot
 
 private:
     struct Message {
@@ -139,6 +141,11 @@ private:
     receiver *rx_ptr;
     bool dsp_running;  // Track DSP state locally
 
+    // Tab management
+    QString currentTab;
+    QWidget *spectrumContainer;
+    QWidget *waterfallContainer;
+    
     void loadEnvironmentVariables();
     QString getBaseHtml();
     void initializeWebView();
@@ -152,6 +159,8 @@ private:
     void switchToChat(int chatId);
     void updateChatSelector();
     void clearChat();
+    void setupTabSystem();
+    void moveVisualizerToTab();
 };
 
 #endif // DOCKSIGINT_H 

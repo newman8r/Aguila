@@ -17,6 +17,8 @@
 #include <QIcon>
 #include <QShortcut>
 #include <QAction>
+#include <QTabWidget>
+#include <QLabel>
 #include "../applications/gqrx/mainwindow.h"
 #include "docksigint.h"
 #include "ui_docksigint.h"
@@ -517,6 +519,22 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     // Load existing chats
     databaseWorker->loadAllChats();
 
+    // Initialize tab system
+    currentTab = "spectrum";
+    spectrumContainer = new QWidget(this);
+    waterfallContainer = new QWidget(this);
+    setupTabSystem();
+    
+    // Create the web channel
+    QWebChannel *channel = new QWebChannel(this);
+    webView->page()->setWebChannel(channel);
+    
+    // Register this object to handle JavaScript calls
+    channel->registerObject(QStringLiteral("qt"), this);
+    
+    // Load the HTML
+    webView->setHtml(getBaseHtml());
+    
     qDebug() << "\n=== SIGINT Panel Initialization ===";
     qDebug() << "App directory:" << QCoreApplication::applicationDirPath();
     qDebug() << "Current working directory:" << QDir::currentPath();
@@ -624,149 +642,138 @@ void DockSigint::onReturnPressed()
 
 QString DockSigint::getBaseHtml()
 {
-    return QString(
-        "<!DOCTYPE html>"
-        "<html>"
-        "<head>"
-        "<style>"
-        "html, body {"
-        "    margin: 0;"
-        "    padding: 0;"
-        "    height: 100%;"
-        "    background: #1e1e1e;"
-        "    color: #d4d4d4;"
-        "    font-family: -apple-system, BlinkMacSystemFont, \"Segoe UI\", Roboto, \"Helvetica Neue\", Arial, sans-serif;"
-        "}"
-        "#chat-container {"
-        "    padding: 16px;"
-        "    height: 100%;"
-        "    overflow-y: auto;"
-        "    scroll-behavior: smooth;"
-        "    display: flex;"
-        "    flex-direction: column;"
-        "}"
-        "#messages {"
-        "    flex-grow: 1;"
-        "    min-height: min-content;"
-        "}"
-        ".message {"
-        "    margin: 16px 0;"
-        "    opacity: 0;"
-        "    transform: translateY(20px);"
-        "    animation: messageIn 0.3s ease-out forwards;"
-        "}"
-        "@keyframes messageIn {"
-        "    to {"
-        "        opacity: 1;"
-        "        transform: translateY(0);"
-        "    }"
-        "}"
-        ".message-content {"
-        "    padding: 16px;"
-        "    border-radius: 8px;"
-        "    line-height: 1.5;"
-        "    position: relative;"
-        "    overflow: hidden;"
-        "}"
-        ".user-message .message-content {"
-        "    background: #2d2d2d;"
-        "    border: 1px solid #3d3d3d;"
-        "    box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
-        "}"
-        ".assistant-message .message-content {"
-        "    background: #1e1e1e;"
-        "}"
-        ".sender {"
-        "    font-weight: 500;"
-        "    margin-bottom: 8px;"
-        "}"
-        ".user-message .sender {"
-        "    color: #4ec9b0;"
-        "}"
-        ".assistant-message .sender {"
-        "    color: #569cd6;"
-        "}"
-        ".copy-button {"
-        "    position: absolute;"
-        "    top: 8px;"
-        "    right: 8px;"
-        "    padding: 4px 8px;"
-        "    background: #3d3d3d;"
-        "    border: none;"
-        "    border-radius: 4px;"
-        "    color: #569cd6;"
-        "    cursor: pointer;"
-        "    opacity: 0.8;"
-        "    transition: all 0.2s ease;"
-        "    font-size: 14px;"
-        "}"
-        ".message-content:hover .copy-button {"
-        "    opacity: 1;"
-        "}"
-        ".copy-button:hover {"
-        "    background: #4d4d4d;"
-        "}"
-        ".welcome {"
-        "    text-align: center;"
-        "    padding: 24px 0;"
-        "}"
-        ".welcome-title {"
-        "    color: #569cd6;"
-        "    font-size: 18px;"
-        "    font-weight: 500;"
-        "    margin-bottom: 8px;"
-        "}"
-        ".welcome-subtitle {"
-        "    color: #4ec9b0;"
-        "    font-size: 14px;"
-        "}"
-        "pre {"
-        "    background: #2d2d2d;"
-        "    padding: 12px;"
-        "    border-radius: 4px;"
-        "    overflow-x: auto;"
-        "}"
-        "code {"
-        "    font-family: \"Cascadia Code\", \"Source Code Pro\", Menlo, Monaco, Consolas, monospace;"
-        "}"
-        "</style>"
-        "<script>"
-        "function copyMessage(element) {"
-        "    const text = element.parentElement.querySelector('.text').innerText;"
-        "    if (navigator.clipboard) {"
-        "        navigator.clipboard.writeText(text).then(() => {"
-        "            const button = element;"
-        "            button.innerHTML = '✓';"
-        "            button.style.background = '#4ec9b0';"
-        "            button.style.color = '#ffffff';"
-        "            setTimeout(() => {"
-        "                button.innerHTML = '📋';"
-        "                button.style.background = '#3d3d3d';"
-        "                button.style.color = '#569cd6';"
-        "            }, 1000);"
-        "        }).catch(err => {"
-        "            console.error('Failed to copy:', err);"
-        "        });"
-        "    }"
-        "}"
-        "function scrollToBottom() {"
-        "    const container = document.getElementById('chat-container');"
-        "    container.scrollTop = container.scrollHeight;"
-        "}"
-        "function appendMessage(html) {"
-        "    const messages = document.getElementById('messages');"
-        "    messages.insertAdjacentHTML('beforeend', html);"
-        "    scrollToBottom();"
-        "}"
-        "</script>"
-        "</head>"
-        "<body>"
-        "<div id=\"chat-container\">"
-        "    <div id=\"messages\"></div>"
-        "</div>"
-        "</body>"
-        "</html>"
-    );
+    return QString(R"HTML(<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+#chat-container {
+    padding: 16px;
+    height: 100%;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    display: flex;
+    flex-direction: column;
+}
+
+#messages {
+    flex-grow: 1;
+    min-height: min-content;
+}
+
+.message {
+    margin: 16px 0;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: messageIn 0.3s ease-out forwards;
+}
+
+@keyframes messageIn {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.message-content {
+    padding: 16px;
+    border-radius: 8px;
+    line-height: 1.5;
+    position: relative;
+    overflow: hidden;
+}
+
+.user-message .message-content {
+    background: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.assistant-message .message-content {
+    background: #1e1e1e;
+}
+
+.sender {
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.user-message .sender {
+    color: #4ec9b0;
+}
+
+.assistant-message .sender {
+    color: #569cd6;
+}
+
+.copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    background: #3d3d3d;
+    border: none;
+    border-radius: 4px;
+    color: #569cd6;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.message-content:hover .copy-button {
+    opacity: 1;
+}
+
+.copy-button:hover {
+    background: #4d4d4d;
+}
+</style>
+
+<script>
+function copyMessage(element) {
+    const text = element.parentElement.querySelector('.text').innerText;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            const button = element;
+            button.innerHTML = '✓';
+            button.style.background = '#4ec9b0';
+            button.style.color = '#ffffff';
+            setTimeout(() => {
+                button.innerHTML = '📋';
+                button.style.background = '#3d3d3d';
+                button.style.color = '#569cd6';
+            }, 1000);
+        }).catch(err => {
+            console.error('Failed to copy:', err);
+        });
+    }
+}
+
+function scrollToBottom() {
+    const container = document.getElementById('chat-container');
+    if (container) container.scrollTop = container.scrollHeight;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    scrollToBottom();
+});
+</script>
+</head>
+<body>
+<div id="chat-container">
+    <div id="messages"></div>
+</div>
+</body>
+</html>)HTML");
 }
 
 void DockSigint::initializeWebView()
@@ -957,7 +964,7 @@ void DockSigint::onCaptureComplete(const SpectrumCapture::CaptureResult& result)
         message += QString("📊 Captured %1 FFT samples\n").arg(result.fft_data.size());
         message += QString("📡 Center Frequency: %1 MHz\n")
                   .arg((result.range.start_freq + result.range.end_freq) / 2e6, 0, 'f', 3);
-        message += QString("📐 Bandwidth: %1 MHz\n")
+        message += QString("📏 Bandwidth: %1 MHz\n")
                   .arg((result.range.end_freq - result.range.start_freq) / 1e6, 0, 'f', 3);
         message += QString("⚡ Sample Rate: %1 MHz\n")
                   .arg(result.range.sample_rate / 1e6, 0, 'f', 3);
@@ -1060,5 +1067,64 @@ void DockSigint::onDspStateChanged(bool running)
         appendMessage("✅ DSP started", false);
     } else {
         appendMessage("❌ DSP stopped", false);
+    }
+}
+
+void DockSigint::setupTabSystem()
+{
+    // Create tab widget
+    QTabWidget *tabWidget = new QTabWidget(this);
+    tabWidget->setTabPosition(QTabWidget::North);
+    tabWidget->setDocumentMode(true);
+    
+    // Create spectrum tab
+    QWidget *spectrumTab = new QWidget();
+    QVBoxLayout *spectrumLayout = new QVBoxLayout(spectrumTab);
+    spectrumLayout->setContentsMargins(0, 0, 0, 0);
+    spectrumLayout->addWidget(spectrumVisualizer);
+    tabWidget->addTab(spectrumTab, "Spectrum Analysis");
+    
+    // Create waterfall tab
+    QWidget *waterfallTab = new QWidget();
+    QVBoxLayout *waterfallLayout = new QVBoxLayout(waterfallTab);
+    waterfallLayout->setContentsMargins(0, 0, 0, 0);
+    QLabel *placeholder = new QLabel("Waterfall Display Coming Soon");
+    placeholder->setAlignment(Qt::AlignCenter);
+    placeholder->setStyleSheet("color: #569cd6; padding: 20px;");
+    waterfallLayout->addWidget(placeholder);
+    tabWidget->addTab(waterfallTab, "Waterfall");
+    
+    // Add tab widget to main layout
+    QVBoxLayout *mainLayout = qobject_cast<QVBoxLayout*>(ui->chatDisplay->layout());
+    if (mainLayout) {
+        mainLayout->insertWidget(0, tabWidget);  // Insert at top, above web view
+    }
+    
+    // Connect tab changed signal
+    connect(tabWidget, &QTabWidget::currentChanged, this, [this](int index) {
+        currentTab = (index == 0) ? "spectrum" : "waterfall";
+        if (currentTab == "spectrum") {
+            spectrumVisualizer->setVisible(true);
+        } else {
+            spectrumVisualizer->setVisible(false);
+        }
+    });
+}
+
+void DockSigint::moveVisualizerToTab()
+{
+    // This function is now deprecated
+}
+
+// JavaScript slot to handle tab changes
+void DockSigint::onTabChanged(const QString &tabName)
+{
+    currentTab = tabName;
+    
+    // Handle visibility of widgets based on active tab
+    if (tabName == "spectrum") {
+        spectrumVisualizer->setVisible(true);
+    } else {
+        spectrumVisualizer->setVisible(false);
     }
 } 
