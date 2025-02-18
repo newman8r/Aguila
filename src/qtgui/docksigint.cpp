@@ -1020,7 +1020,6 @@ void DockSigint::testSpectrumCapture()
         return;
     }
 
-    // Check if DSP is running using our locally tracked state
     if (!dsp_running) {
         qDebug() << "❌ Error: DSP not running";
         appendMessage("❌ Error: DSP is not running. Please start DSP first (click the power button).", false);
@@ -1028,7 +1027,6 @@ void DockSigint::testSpectrumCapture()
     }
 
     qDebug() << "🎯 Getting current parameters...";
-    // Create a test range around current frequency
     double center_freq = spectrumCapture->getCurrentCenterFreq();
     double sample_rate = spectrumCapture->getCurrentSampleRate();
     
@@ -1042,11 +1040,12 @@ void DockSigint::testSpectrumCapture()
     }
     
     qDebug() << "📊 Creating capture range...";
+    // Capture 50 kHz centered on current frequency
     SpectrumCapture::CaptureRange range {
-        .start_freq = center_freq - (sample_rate / 4),  // Start 1/4 bandwidth below center
-        .end_freq = center_freq + (sample_rate / 4),    // End 1/4 bandwidth above center
+        .start_freq = center_freq - 25000,  // 25 kHz below center
+        .end_freq = center_freq + 25000,    // 25 kHz above center
         .fft_size = 4096,
-        .sample_rate = sample_rate
+        .sample_rate = 50000  // 50 kHz sample rate
     };
 
     qDebug() << "Range parameters:";
@@ -1056,10 +1055,38 @@ void DockSigint::testSpectrumCapture()
     qDebug() << "- Sample rate:" << range.sample_rate << "Hz";
 
     qDebug() << "🚀 Attempting capture...";
-    // Attempt capture
     try {
-        spectrumCapture->captureRange(range);
-        qDebug() << "✅ Capture initiated successfully";
+        auto result = spectrumCapture->captureRange(range);
+        if (result.success) {
+            qDebug() << "\n=== 📊 FFT Data ===";
+            qDebug() << "Timestamp:" << QDateTime::fromMSecsSinceEpoch(result.timestamp * 1000).toString("yyyy-MM-dd HH:mm:ss.zzz");
+            qDebug() << "Center Frequency:" << (range.start_freq + range.end_freq) / 2 << "Hz";
+            qDebug() << "Bandwidth:" << (range.end_freq - range.start_freq) << "Hz";
+            qDebug() << "Sample Rate:" << range.sample_rate << "Hz";
+            qDebug() << "FFT Size:" << range.fft_size;
+            qDebug() << "Resolution:" << (range.sample_rate / range.fft_size) << "Hz/bin";
+            qDebug() << "\nFFT Data (dB):";
+            
+            // Print FFT data in a format easy to copy/paste
+            QString fftDataStr = "[\n";
+            for (size_t i = 0; i < result.fft_data.size(); ++i) {
+                fftDataStr += QString::number(result.fft_data[i], 'f', 2);
+                if (i < result.fft_data.size() - 1) {
+                    fftDataStr += ", ";
+                }
+                if ((i + 1) % 8 == 0) {  // 8 values per line
+                    fftDataStr += "\n";
+                }
+            }
+            fftDataStr += "\n]";
+            qDebug().noquote() << fftDataStr;
+            qDebug() << "===================\n";
+            
+            appendMessage("✅ FFT data captured successfully. Check the debug log for the data.", false);
+        } else {
+            qDebug() << "❌ Capture failed:" << QString::fromStdString(result.error_message);
+            appendMessage(QString("❌ Capture failed: %1").arg(QString::fromStdString(result.error_message)), false);
+        }
     }
     catch (const std::exception& e) {
         qDebug() << "❌ Exception during capture:" << e.what();
