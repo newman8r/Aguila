@@ -35,6 +35,7 @@
 #include <QPair>
 #include <QDateTime>
 #include <QTextStream>
+#include "sigint_logger.h"  // Include our logger header
 
 #ifdef WITH_PORTAUDIO
 #include <portaudio.h>
@@ -52,72 +53,22 @@
 static void reset_conf(const QString &file_name);
 static void list_conf();
 
-// Global file for logging
-static QFile *logFile = nullptr;
-static QTextStream *logStream = nullptr;
-
-// Custom message handler for SIGINT panel
-void sigintMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg)
-{
-    // Force stderr to flush
-    fflush(stderr);
-
-    // Get timestamp
-    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz");
-    
-    // Format message
-    QString txt = QString("[%1] %2: %3").arg(timestamp);
-    
-    switch (type) {
-    case QtDebugMsg:
-        txt = txt.arg("Debug").arg(msg);
-        fprintf(stderr, "SIGINT Debug [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
-        break;
-    case QtInfoMsg:
-        txt = txt.arg("Info").arg(msg);
-        fprintf(stderr, "SIGINT Info [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
-        break;
-    case QtWarningMsg:
-        txt = txt.arg("Warning").arg(msg);
-        fprintf(stderr, "SIGINT Warning [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
-        break;
-    case QtCriticalMsg:
-        txt = txt.arg("Critical").arg(msg);
-        fprintf(stderr, "SIGINT Critical [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
-        break;
-    case QtFatalMsg:
-        txt = txt.arg("Fatal").arg(msg);
-        fprintf(stderr, "SIGINT Fatal [%s]: %s\n", qPrintable(timestamp), msg.toLocal8Bit().constData());
-        break;
-    }
-
-    // Also log to file
-    if (logStream)
-    {
-        *logStream << txt << Qt::endl;
-        logStream->flush();
-    }
-
-    // Force stderr to flush again
-    fflush(stderr);
-}
-
 int main(int argc, char *argv[])
 {
-    // Set up logging file
+    // Initialize our custom logger
     QString logPath = QDir::homePath() + "/.config/gqrx/sigint.log";
-    logFile = new QFile(logPath);
-    if (logFile->open(QIODevice::WriteOnly | QIODevice::Append))
-    {
-        logStream = new QTextStream(logFile);
-        *logStream << "\n=== Starting GQRX SIGINT at " 
-                  << QDateTime::currentDateTime().toString()
-                  << " ===\n" << Qt::endl;
-    }
-
-    // Register custom message handler
-    qInstallMessageHandler(sigintMessageHandler);
-
+    SigintLogger::initialize(logPath);
+    
+    // Only disable Qt's debug output, keep other important messages
+    QLoggingCategory::setFilterRules(QString(
+        "qt.*.debug=false\n"    // Disable noisy Qt debug messages
+        "qt.*.info=false\n"     // Disable Qt info messages
+        "*.debug=true\n"        // But keep our debug messages
+        "*.warning=true\n"      // Keep warnings
+        "*.critical=true\n"     // Keep critical errors
+        "*.fatal=true"          // Keep fatal errors
+    ));
+    
     // Register types for queuing between threads
     qRegisterMetaType<QVector<QPair<QString, QString>>>("QVector<QPair<QString,QString>>");
 
@@ -133,7 +84,6 @@ int main(int argc, char *argv[])
 #if QT_VERSION < QT_VERSION_CHECK(6, 0, 0)
     QCoreApplication::setAttribute(Qt::AA_UseHighDpiPixmaps, true);
 #endif
-    QLoggingCategory::setFilterRules("*.debug=false");
 
     QString plugin_path = QDir::cleanPath(QCoreApplication::applicationDirPath() + "/../soapy-modules");
     QFileInfo plugin_path_info(plugin_path);
@@ -255,17 +205,7 @@ int main(int argc, char *argv[])
 #endif
 
     // Clean up logging
-    if (logStream)
-    {
-        delete logStream;
-        logStream = nullptr;
-    }
-    if (logFile)
-    {
-        logFile->close();
-        delete logFile;
-        logFile = nullptr;
-    }
+    SigintLogger::cleanup();
 
     return return_code;
 }

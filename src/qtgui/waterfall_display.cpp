@@ -2,6 +2,8 @@
 #include <QPainter>
 #include <QDateTime>
 #include <QtMath>
+#include <QDebug>
+#include "sigint_logger.h"
 
 WaterfallDisplay::WaterfallDisplay(QWidget *parent)
     : QOpenGLWidget(parent)
@@ -22,7 +24,19 @@ WaterfallDisplay::~WaterfallDisplay() = default;
 
 void WaterfallDisplay::initializeGL()
 {
+    SigintLogger::debug("🔧 Initializing WaterfallDisplay OpenGL");
+    
     initializeOpenGLFunctions();
+    
+    // Log OpenGL context information
+    SigintLogger::debug(QString("  - OpenGL Version: %1")
+        .arg(QString((const char*)glGetString(GL_VERSION))));
+    SigintLogger::debug(QString("  - GLSL Version: %1")
+        .arg(QString((const char*)glGetString(GL_SHADING_LANGUAGE_VERSION))));
+    SigintLogger::debug(QString("  - Vendor: %1")
+        .arg(QString((const char*)glGetString(GL_VENDOR))));
+    SigintLogger::debug(QString("  - Renderer: %1")
+        .arg(QString((const char*)glGetString(GL_RENDERER))));
     
     // Set background color
     glClearColor(0.16f, 0.16f, 0.18f, 1.0f);
@@ -59,20 +73,35 @@ void WaterfallDisplay::initializeGL()
     initializeColorMap();
     
     m_initialized = true;
+    SigintLogger::debug("✅ OpenGL initialization complete");
 }
 
 void WaterfallDisplay::paintGL()
 {
-    if (!m_initialized)
+    SigintLogger::debug("🎨 Waterfall paintGL called");
+    SigintLogger::debug(QString("  - OpenGL initialized: %1").arg(m_initialized));
+    SigintLogger::debug(QString("  - Current size: %1x%2").arg(width()).arg(height()));
+    
+    if (!m_initialized) {
+        SigintLogger::warning("  ⚠️ OpenGL not initialized!");
         return;
-
-    glClear(GL_COLOR_BUFFER_BIT);
+    }
     
     QMutexLocker locker(&m_mutex);
     
-    if (m_data.history.empty())
+    if (m_data.history.empty()) {
+        SigintLogger::debug("  - No data to display");
         return;
-
+    }
+    
+    // Log rendering stats
+    SigintLogger::debug("  - Rendering waterfall with:");
+    SigintLogger::debug(QString("    - History lines: %1").arg(m_data.history.size()));
+    SigintLogger::debug(QString("    - Time span: %1 seconds").arg(m_time_span));
+    SigintLogger::debug(QString("    - dB range: %1 to %2").arg(m_min_db).arg(m_max_db));
+    
+    glClear(GL_COLOR_BUFFER_BIT);
+    
     m_program.bind();
     
     // Set up transformation matrix
@@ -115,20 +144,37 @@ void WaterfallDisplay::updateData(const std::vector<float>& fft_data,
 {
     QMutexLocker locker(&m_mutex);
     
-    // Update parameters
+    SigintLogger::debug("🌊 Waterfall received new FFT data:");
+    SigintLogger::debug(QString("  - Data size: %1").arg(fft_data.size()));
+    SigintLogger::debug(QString("  - Center freq: %1 Hz").arg(center_freq));
+    SigintLogger::debug(QString("  - Bandwidth: %1 Hz").arg(bandwidth));
+    SigintLogger::debug(QString("  - Sample rate: %1 Hz").arg(sample_rate));
+    
+    // Log some sample values
+    if (!fft_data.empty()) {
+        SigintLogger::debug("  - First 5 FFT values:");
+        for (size_t i = 0; i < std::min(size_t(5), fft_data.size()); ++i) {
+            SigintLogger::debug(QString("    [%1]: %2 dB").arg(i).arg(fft_data[i]));
+        }
+    }
+    
+    // Store the data
+    m_data.history.push_front(fft_data);
     m_data.center_freq = center_freq;
     m_data.bandwidth = bandwidth;
     m_data.sample_rate = sample_rate;
-    
-    // Add new data to history
-    m_data.history.push_front(fft_data);
-    if (m_data.history.size() > m_data.max_history)
-        m_data.history.pop_back();
-    
     m_data.last_update = QDateTime::currentMSecsSinceEpoch();
     
-    // Update visualization
-    updateVertices();
+    // Maintain history size
+    while (m_data.history.size() > m_data.max_history) {
+        m_data.history.pop_back();
+    }
+    
+    SigintLogger::debug(QString("  - History size: %1/%2")
+        .arg(m_data.history.size())
+        .arg(m_data.max_history));
+    
+    // Request an update
     update();
 }
 

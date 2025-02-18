@@ -58,6 +58,8 @@ add_source_files(SRCS_LIST
 	plotter.h
 	qtcolorpicker.cpp
 	qtcolorpicker.h
+	sigint_logger.cpp
+	sigint_logger.h
 )
 
 #######################################################################################################################
