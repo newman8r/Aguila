@@ -1082,6 +1082,28 @@ void DockSigint::setupTabSystem()
     tabWidget->setTabPosition(QTabWidget::North);
     tabWidget->setDocumentMode(true);
     
+    // Style the tab widget for better visibility
+    tabWidget->setStyleSheet(R"(
+        QTabWidget::pane { 
+            border: none;
+        }
+        QTabBar::tab {
+            background: #2d2d2d;
+            color: #d4d4d4;
+            padding: 8px 16px;
+            border: none;
+            border-top-left-radius: 4px;
+            border-top-right-radius: 4px;
+        }
+        QTabBar::tab:selected {
+            background: #3d3d3d;
+            color: #ffffff;
+        }
+        QTabBar::tab:hover {
+            background: #353535;
+        }
+    )");
+    
     // Create spectrum tab
     QWidget *spectrumTab = new QWidget();
     QVBoxLayout *spectrumLayout = new QVBoxLayout(spectrumTab);
