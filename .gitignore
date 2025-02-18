@@ -9,3 +9,8 @@
 cmake-build*/
 /CMakeLists.txt.user
 .env
+DEBUG-LOG.md
+difficult-feature.md
+ERROR-DEBUG.md
+SIGINT_DEVELOPMENT.md
+tricky-log.md
