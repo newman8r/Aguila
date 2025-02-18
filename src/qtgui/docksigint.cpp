@@ -19,6 +19,7 @@
 #include <QAction>
 #include <QTabWidget>
 #include <QLabel>
+#include <QSplitter>
 #include "../applications/gqrx/mainwindow.h"
 #include "docksigint.h"
 #include "ui_docksigint.h"
@@ -1072,8 +1073,12 @@ void DockSigint::onDspStateChanged(bool running)
 
 void DockSigint::setupTabSystem()
 {
+    // Create main splitter
+    QSplitter *mainSplitter = new QSplitter(Qt::Vertical, this);
+    mainSplitter->setChildrenCollapsible(false);  // Prevent areas from being collapsed completely
+    
     // Create tab widget
-    QTabWidget *tabWidget = new QTabWidget(this);
+    QTabWidget *tabWidget = new QTabWidget();
     tabWidget->setTabPosition(QTabWidget::North);
     tabWidget->setDocumentMode(true);
     
@@ -1094,10 +1099,26 @@ void DockSigint::setupTabSystem()
     waterfallLayout->addWidget(placeholder);
     tabWidget->addTab(waterfallTab, "Waterfall");
     
-    // Add tab widget to main layout
+    // Add widgets to splitter
+    mainSplitter->addWidget(tabWidget);
+    mainSplitter->addWidget(webView);
+    
+    // Set initial sizes - give chat area more space
+    QList<int> sizes;
+    sizes << 200 << 400;  // Visualization: 200px, Chat: 400px
+    mainSplitter->setSizes(sizes);
+    
+    // Add splitter to main layout
     QVBoxLayout *mainLayout = qobject_cast<QVBoxLayout*>(ui->chatDisplay->layout());
     if (mainLayout) {
-        mainLayout->insertWidget(0, tabWidget);  // Insert at top, above web view
+        // Clear any existing widgets
+        while (QLayoutItem* item = mainLayout->takeAt(0)) {
+            if (QWidget* widget = item->widget()) {
+                widget->setParent(nullptr);
+            }
+            delete item;
+        }
+        mainLayout->addWidget(mainSplitter);
     }
     
     // Connect tab changed signal
@@ -1109,6 +1130,10 @@ void DockSigint::setupTabSystem()
             spectrumVisualizer->setVisible(false);
         }
     });
+    
+    // Set minimum sizes to prevent areas from becoming too small
+    tabWidget->setMinimumHeight(150);  // Minimum height for visualization
+    webView->setMinimumHeight(100);    // Minimum height for chat
 }
 
 void DockSigint::moveVisualizerToTab()
