@@ -144,17 +144,17 @@ void WaterfallDisplay::updateData(const std::vector<float>& fft_data,
 {
     QMutexLocker locker(&m_mutex);
     
-    SigintLogger::debug("🌊 Waterfall received new FFT data:");
-    SigintLogger::debug(QString("  - Data size: %1").arg(fft_data.size()));
-    SigintLogger::debug(QString("  - Center freq: %1 Hz").arg(center_freq));
-    SigintLogger::debug(QString("  - Bandwidth: %1 Hz").arg(bandwidth));
-    SigintLogger::debug(QString("  - Sample rate: %1 Hz").arg(sample_rate));
+    qDebug() << "\n=== 🌊 Waterfall Data Update ===";
+    qDebug() << "  - Data size:" << fft_data.size();
+    qDebug() << "  - Center freq:" << center_freq << "Hz";
+    qDebug() << "  - Bandwidth:" << bandwidth << "Hz";
+    qDebug() << "  - Sample rate:" << sample_rate << "Hz";
     
     // Log some sample values
     if (!fft_data.empty()) {
-        SigintLogger::debug("  - First 5 FFT values:");
+        qDebug() << "  - First 5 FFT values:";
         for (size_t i = 0; i < std::min(size_t(5), fft_data.size()); ++i) {
-            SigintLogger::debug(QString("    [%1]: %2 dB").arg(i).arg(fft_data[i]));
+            qDebug() << "    [" << i << "]:" << fft_data[i] << "dB";
         }
     }
     
@@ -170,9 +170,9 @@ void WaterfallDisplay::updateData(const std::vector<float>& fft_data,
         m_data.history.pop_back();
     }
     
-    SigintLogger::debug(QString("  - History size: %1/%2")
-        .arg(m_data.history.size())
-        .arg(m_data.max_history));
+    qDebug() << "  - History size:" << m_data.history.size() << "/" << m_data.max_history;
+    qDebug() << "  - Last update:" << QDateTime::fromMSecsSinceEpoch(m_data.last_update).toString("yyyy-MM-dd HH:mm:ss.zzz");
+    qDebug() << "=================================\n";
     
     // Request an update
     update();

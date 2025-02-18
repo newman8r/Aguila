@@ -374,10 +374,20 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
             this, [this](const SpectrumCapture::CaptureResult& result) {
         if (result.success) {
             double bandwidth = result.range.end_freq - result.range.start_freq;
-            spectrumVisualizer->updateData(result.fft_data,
-                                         result.range.start_freq + bandwidth/2,
-                                         bandwidth,
-                                         result.range.sample_rate);
+            double center_freq = result.range.start_freq + bandwidth/2;
+            
+            // Update both visualizers with the same data
+            spectrumVisualizer->updateData(result.fft_data, center_freq, bandwidth, result.range.sample_rate);
+            if (waterfallDisplay) {
+                qDebug() << "🌊 Sending data to waterfall display:";
+                qDebug() << "  - FFT data size:" << result.fft_data.size();
+                qDebug() << "  - Center freq:" << center_freq << "Hz";
+                qDebug() << "  - Bandwidth:" << bandwidth << "Hz";
+                qDebug() << "  - Sample rate:" << result.range.sample_rate << "Hz";
+                waterfallDisplay->updateData(result.fft_data, center_freq, bandwidth, result.range.sample_rate);
+            } else {
+                qDebug() << "❌ Waterfall display not initialized";
+            }
         }
     });
 
