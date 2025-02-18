@@ -23,6 +23,7 @@
 #include "../applications/gqrx/mainwindow.h"
 #include "docksigint.h"
 #include "ui_docksigint.h"
+#include "waterfall_display.h"
 
 // NetworkWorker implementation
 NetworkWorker::NetworkWorker(QObject *parent) : QObject(parent)
@@ -308,7 +309,8 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     ui(new Ui::DockSigint),
     currentChatId(1),
     rx_ptr(rx_ptr),
-    dsp_running(false)  // Initialize DSP state
+    dsp_running(false),  // Initialize DSP state
+    waterfallDisplay(nullptr)  // Initialize waterfall display
 {
     qDebug() << "\n=== 🚀 SIGINT Panel Starting Up 🚀 ===";
     
@@ -1111,14 +1113,18 @@ void DockSigint::setupTabSystem()
     spectrumLayout->addWidget(spectrumVisualizer);
     tabWidget->addTab(spectrumTab, "Spectrum Analysis");
     
-    // Create waterfall tab
+    // Create waterfall tab with actual waterfall display
     QWidget *waterfallTab = new QWidget();
     QVBoxLayout *waterfallLayout = new QVBoxLayout(waterfallTab);
     waterfallLayout->setContentsMargins(0, 0, 0, 0);
-    QLabel *placeholder = new QLabel("Waterfall Display Coming Soon");
-    placeholder->setAlignment(Qt::AlignCenter);
-    placeholder->setStyleSheet("color: #569cd6; padding: 20px;");
-    waterfallLayout->addWidget(placeholder);
+    
+    // Initialize waterfall display if not already done
+    if (!waterfallDisplay) {
+        waterfallDisplay = std::make_unique<WaterfallDisplay>(this);
+        waterfallDisplay->setMinMax(-120.0f, -20.0f);  // Same range as spectrum
+        waterfallDisplay->setTimeSpan(10.0f);  // 10 seconds of history
+    }
+    waterfallLayout->addWidget(waterfallDisplay.get());
     tabWidget->addTab(waterfallTab, "Waterfall");
     
     // Add widgets to splitter
@@ -1146,10 +1152,13 @@ void DockSigint::setupTabSystem()
     // Connect tab changed signal
     connect(tabWidget, &QTabWidget::currentChanged, this, [this](int index) {
         currentTab = (index == 0) ? "spectrum" : "waterfall";
+        qDebug() << "Switched to tab:" << currentTab;
         if (currentTab == "spectrum") {
             spectrumVisualizer->setVisible(true);
+            if (waterfallDisplay) waterfallDisplay->setVisible(false);
         } else {
             spectrumVisualizer->setVisible(false);
+            if (waterfallDisplay) waterfallDisplay->setVisible(true);
         }
     });
     
@@ -1173,5 +1182,19 @@ void DockSigint::onTabChanged(const QString &tabName)
         spectrumVisualizer->setVisible(true);
     } else {
         spectrumVisualizer->setVisible(false);
+    }
+}
+
+void DockSigint::onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate)
+{
+    // Update spectrum visualizer
+    spectrumVisualizer->updateData(fft_data, center_freq, bandwidth, sample_rate);
+    
+    // Update waterfall display if it exists and is visible
+    if (waterfallDisplay && currentTab == "waterfall") {
+        qDebug() << "Updating waterfall with" << fft_data.size() << "samples";
+        qDebug() << "Center freq:" << center_freq << "Hz";
+        qDebug() << "Bandwidth:" << bandwidth << "Hz";
+        waterfallDisplay->updateData(fft_data, center_freq, bandwidth, sample_rate);
     }
 } 

@@ -38,6 +38,8 @@ add_source_files(SRCS_LIST
 	spectrum_capture.h
 	spectrum_visualizer.cpp
 	spectrum_visualizer.h
+	waterfall_display.cpp
+	waterfall_display.h
 	dxc_options.cpp
 	dxc_options.h
 	dxc_spots.cpp

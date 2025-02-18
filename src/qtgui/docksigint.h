@@ -3,6 +3,7 @@
 
 #include "spectrum_capture.h"
 #include "spectrum_visualizer.h"
+#include "waterfall_display.h"
 #include "../applications/gqrx/receiver.h"
 #include <QDockWidget>
 #include <QSettings>
@@ -107,6 +108,7 @@ private slots:
     void onCaptureProgress(int percent);
     void testSpectrumCapture();  // Test function
     void onTabChanged(const QString &tabName);  // Add this new slot
+    void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
 
 private:
     struct Message {
@@ -137,6 +139,7 @@ private:
     // Spectrum capture and visualization
     std::unique_ptr<SpectrumCapture> spectrumCapture;
     SpectrumVisualizer *spectrumVisualizer;
+    std::unique_ptr<WaterfallDisplay> waterfallDisplay;  // Add waterfall display
 
     receiver *rx_ptr;
     bool dsp_running;  // Track DSP state locally
