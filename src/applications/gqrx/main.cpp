@@ -59,14 +59,20 @@ int main(int argc, char *argv[])
     QString logPath = QDir::homePath() + "/.config/gqrx/sigint.log";
     SigintLogger::initialize(logPath);
     
-    // Only disable Qt's debug output, keep other important messages
+    // Set up detailed Qt logging filters
     QLoggingCategory::setFilterRules(QString(
-        "qt.*.debug=false\n"    // Disable noisy Qt debug messages
-        "qt.*.info=false\n"     // Disable Qt info messages
-        "*.debug=true\n"        // But keep our debug messages
-        "*.warning=true\n"      // Keep warnings
-        "*.critical=true\n"     // Keep critical errors
-        "*.fatal=true"          // Keep fatal errors
+        // Disable all Qt internal debug messages
+        "qt.*=false\n"
+        // Specifically disable noisy subsystems
+        "qt.qpa.*=false\n"
+        "qt.accessibility.*=false\n"
+        "qt.widgets.*=false\n"
+        "qt.events.*=false\n"
+        // But enable our application's messages
+        "gqrx.*=true\n"
+        // And keep important Qt errors
+        "qt.*.critical=true\n"
+        "qt.*.fatal=true"
     ));
     
     // Register types for queuing between threads
