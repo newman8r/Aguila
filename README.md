@@ -272,3 +272,37 @@ Pro+ support to GNU Radio and Gqrx.
 Let me know if somebody is missing from the list.
 
 Alex OZ9AEC
+
+# Aguila SDR Platform
+
+## SDR Device Management
+
+### Switching Between SDR Devices
+To prevent configuration conflicts when switching between different SDR devices (e.g., HackRF and RTL-SDR), use the provided `sdr_switch.sh` script:
+
+1. Close GQRX completely if it's running
+2. Run the script with your desired device:
+   ```bash
+   # For HackRF:
+   ./resources/sdr_switch.sh hackrf
+
+   # For RTL-SDR:
+   ./resources/sdr_switch.sh rtlsdr
+   ```
+3. Launch GQRX normally
+
+The script will:
+- Back up your current GQRX configuration
+- Restore device-specific settings if available
+- Create a fresh configuration if needed
+- Automatically save working configurations for each device
+
+This prevents configuration conflicts and segmentation faults that can occur when switching between different SDR devices.
+
+### Troubleshooting Device Switching
+If you encounter issues:
+1. Close GQRX completely
+2. Run the switch script for your desired device
+3. Launch GQRX fresh
+
+Your device-specific configurations will be saved automatically when GQRX exits normally.
