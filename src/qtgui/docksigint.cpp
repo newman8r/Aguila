@@ -1463,24 +1463,48 @@ void DockSigint::captureWaterfallScreenshot()
     // Find the waterfall widget
     QWidget* waterfallWidget = findWaterfallWidget();
     if (!waterfallWidget) {
-        appendMessage("❌ Error: Could not find waterfall widget", false);
+        QString error = "Could not find waterfall widget";
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
         return;
     }
 
     // Get the plotter
     auto *plotter = qobject_cast<CPlotter*>(waterfallWidget);
     if (!plotter) {
-        appendMessage("❌ Error: Could not access plotter functions", false);
+        QString error = "Could not access plotter functions";
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
         return;
     }
 
-    // Get the frequency
+    // Get signal parameters
     double demodFreq = plotter->getDemodCenterFreq();
+    double sampleRate = plotter->getSampleRate();
+    int filterLowCut, filterHighCut;
+    plotter->getHiLowCutFrequencies(&filterLowCut, &filterHighCut);
+    double filterBandwidth = (filterHighCut - filterLowCut);
+    
+    qDebug() << "📡 Signal Parameters:";
+    qDebug() << "  - Demod Frequency:" << demodFreq << "Hz (" << demodFreq/1e6 << "MHz)";
+    qDebug() << "  - Sample Rate:" << sampleRate << "Hz (" << sampleRate/1e6 << "MHz)";
+    qDebug() << "  - Filter Bandwidth:" << filterBandwidth << "Hz (" << filterBandwidth/1e3 << "kHz)";
+    qDebug() << "  - Filter Range:" << filterLowCut << "to" << filterHighCut << "Hz";
     
     // Set up capture parameters
     QRect widgetRect = waterfallWidget->rect();
     int centerX = plotter->xFromFreq(demodFreq);
     int sliceWidth = 100;  // Width of the slice to capture
+    
+    // Calculate actual frequency range of the slice
+    double pixelsPerHz = plotter->width() / sampleRate;
+    double captureWidthHz = sliceWidth / pixelsPerHz;
+    
+    qDebug() << "📊 Capture Parameters:";
+    qDebug() << "  - Widget size:" << widgetRect.size();
+    qDebug() << "  - Center X:" << centerX;
+    qDebug() << "  - Slice width:" << sliceWidth << "pixels";
+    qDebug() << "  - Capture bandwidth:" << captureWidthHz << "Hz (" << captureWidthHz/1e3 << "kHz)";
     
     // Create capture rectangle
     QRect captureRect(
@@ -1507,27 +1531,49 @@ void DockSigint::captureWaterfallScreenshot()
                 QByteArray imageData = imageFile.readAll();
                 imageFile.close();
                 
-                // Create simple analysis prompt
+                // Create detailed analysis prompt
                 QString analysisPrompt = QString(
-                    "Please analyze this waterfall signal data from GQRX. "
-                    "Frequency: %1 MHz, Bandwidth: %2 kHz. "
-                    "What type of signal is this and what are its key characteristics?"
-                ).arg(demodFreq / 1e6, 0, 'f', 3)
-                 .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
+                    "Please analyze this waterfall signal data from GQRX:\n\n"
+                    "📡 Signal Parameters:\n"
+                    "- Center Frequency: %1 MHz\n"
+                    "- Filter Bandwidth: %2 kHz\n"
+                    "- Sample Rate: %3 MHz\n"
+                    "- Capture Width: %4 kHz\n\n"
+                    "Please analyze this signal and tell me:\n"
+                    "1. The likely signal type(s)\n"
+                    "2. Any modulation characteristics you can identify\n"
+                    "3. Potential sources or applications\n"
+                    "4. Signal quality assessment\n\n"
+                    "If you're unsure about the precise signal type, please provide several likely possibilities. "
+                    "Include any other relevant observations about the signal pattern, strength, or unique characteristics."
+                ).arg(demodFreq / 1e6, 0, 'f', 6)
+                 .arg(filterBandwidth / 1e3, 0, 'f', 2)
+                 .arg(sampleRate / 1e6, 0, 'f', 3)
+                 .arg(captureWidthHz / 1e3, 0, 'f', 2);
+
+                qDebug() << "\n📝 Analysis Prompt:";
+                qDebug().noquote() << analysisPrompt;
+                qDebug() << "";
 
                 // Send to Claude
                 appendMessage("🔍 Analyzing signal...", false);
                 sendToClaude(analysisPrompt, imageData);
             } else {
-                appendMessage("❌ Error: Could not read captured image", false);
+                QString error = "Could not read captured image";
+                qDebug() << "❌ Error:" << error;
+                appendMessage("❌ Error: " + error, false);
             }
             
             // Clean up
             QFile::remove(filepath);
         } else {
-            appendMessage("❌ Error: Could not save screenshot", false);
+            QString error = "Could not save screenshot";
+            qDebug() << "❌ Error:" << error;
+            appendMessage("❌ Error: " + error, false);
         }
     } else {
-        appendMessage("❌ Error: Could not create temporary file", false);
+        QString error = "Could not create temporary file";
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
     }
 } 
