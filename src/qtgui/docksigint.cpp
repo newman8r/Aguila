@@ -511,6 +511,18 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
             messageHistory.append(newMsg);
             appendMessageToView(newMsg.content, newMsg.role == "user");
         }
+        
+        // Add placeholder message if chat is empty
+        if (messages.isEmpty()) {
+            QString placeholder = "👋 Welcome to your new chat session!\n\n"
+                                "I'm here to help you analyze signals and work with your SDR. "
+                                "You can:\n"
+                                "• Capture and analyze waterfall screenshots (Ctrl+P)\n"
+                                "• Ask questions about signal types and characteristics\n"
+                                "• Get help with SDR settings and configurations\n\n"
+                                "What would you like to do?";
+            appendMessageToView(placeholder, false);
+        }
     });
     connect(databaseWorker, &DatabaseWorker::chatsLoaded, this, &DockSigint::onChatsLoaded);
     connect(databaseWorker, &DatabaseWorker::chatCreated, this, [this](int chatId, const QString &name) {
