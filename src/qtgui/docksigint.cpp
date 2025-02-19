@@ -20,6 +20,8 @@
 #include <QTabWidget>
 #include <QLabel>
 #include <QSplitter>
+#include <QPushButton>
+#include <QHBoxLayout>
 #include "../applications/gqrx/mainwindow.h"
 #include "docksigint.h"
 #include "ui_docksigint.h"
@@ -1136,6 +1138,52 @@ void DockSigint::setupTabSystem()
     QSplitter *mainSplitter = new QSplitter(Qt::Vertical, this);
     mainSplitter->setChildrenCollapsible(false);  // Prevent areas from being collapsed completely
     
+    // Create toolbar widget
+    QWidget *toolbar = new QWidget();
+    toolbar->setMinimumHeight(40);
+    toolbar->setMaximumHeight(40);
+    toolbar->setStyleSheet(R"(
+        QWidget {
+            background-color: #1e1e1e;
+            border: 1px solid #2d2d2d;
+            border-radius: 6px;
+            margin: 4px 0px;
+        }
+        QPushButton {
+            background-color: rgba(45, 45, 45, 0.7);
+            color: #d4d4d4;
+            border: 1px solid rgba(61, 61, 61, 0.8);
+            border-radius: 4px;
+            padding: 4px 12px;
+            font-size: 13px;
+            font-weight: 500;
+            margin: 4px;
+        }
+        QPushButton:hover {
+            background-color: rgba(61, 61, 61, 0.8);
+            border: 1px solid rgba(86, 156, 214, 0.5);
+            color: #569cd6;
+        }
+        QPushButton:pressed {
+            background-color: rgba(14, 99, 156, 0.8);
+            border: 1px solid rgba(86, 156, 214, 0.8);
+            color: white;
+        }
+    )");
+
+    // Create toolbar layout
+    QHBoxLayout *toolbarLayout = new QHBoxLayout(toolbar);
+    toolbarLayout->setContentsMargins(8, 0, 8, 0);
+    toolbarLayout->setSpacing(8);
+
+    // Add screenshot button
+    QPushButton *screenshotBtn = new QPushButton("📸 Screenshot");
+    screenshotBtn->setObjectName("screenshotButton");
+    toolbarLayout->addWidget(screenshotBtn);
+
+    // Add spacer to push everything to the left
+    toolbarLayout->addStretch();
+    
     // Create tab widget
     QTabWidget *tabWidget = new QTabWidget();
     tabWidget->setTabPosition(QTabWidget::North);
@@ -1185,12 +1233,13 @@ void DockSigint::setupTabSystem()
     tabWidget->addTab(waterfallTab, "Waterfall");
     
     // Add widgets to splitter
+    mainSplitter->addWidget(toolbar);  // Add toolbar first
     mainSplitter->addWidget(tabWidget);
     mainSplitter->addWidget(webView);
     
     // Set initial sizes - give chat area more space
     QList<int> sizes;
-    sizes << 200 << 400;  // Visualization: 200px, Chat: 400px
+    sizes << 40 << 200 << 400;  // Toolbar: 40px, Visualization: 200px, Chat: 400px
     mainSplitter->setSizes(sizes);
     
     // Add splitter to main layout
