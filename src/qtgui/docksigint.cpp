@@ -1180,6 +1180,9 @@ void DockSigint::setupTabSystem()
     QPushButton *screenshotBtn = new QPushButton("📸 Screenshot");
     screenshotBtn->setObjectName("screenshotButton");
     toolbarLayout->addWidget(screenshotBtn);
+    
+    // Connect screenshot button to capture function
+    connect(screenshotBtn, &QPushButton::clicked, this, &DockSigint::captureWaterfallScreenshot);
 
     // Add spacer to push everything to the left
     toolbarLayout->addStretch();
