@@ -1028,6 +1028,12 @@ void DockSigint::appendMessageToView(const QString &message, bool isUser)
 
 void DockSigint::sendToClaude(const QString &message, std::function<void(const QString&)> callback)
 {
+    // Call the three-parameter version with empty image data
+    sendToClaude(message, QByteArray(), callback);
+}
+
+void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData, std::function<void(const QString&)> callback)
+{
     qDebug() << "Preparing to send message to Claude...";
     
     if (anthropicApiKey.isEmpty()) {
@@ -1036,7 +1042,7 @@ void DockSigint::sendToClaude(const QString &message, std::function<void(const Q
         return;
     }
 
-    // Prepare the messages array with proper format
+    // Prepare the messages array with history
     QJsonArray messages;
     for (const auto &msg : messageHistory) {
         messages.append(QJsonObject{
@@ -1046,75 +1052,38 @@ void DockSigint::sendToClaude(const QString &message, std::function<void(const Q
     }
 
     // Add the current message
-    messages.append(QJsonObject{
-        {"role", "user"},
-        {"content", message}
-    });
-
-    qDebug() << "Message history size:" << messages.size();
-    
-    // Connect a one-time handler for the response if callback provided
-    if (callback) {
-        QMetaObject::Connection *connection = new QMetaObject::Connection;
-        *connection = connect(networkWorker, &NetworkWorker::messageReceived,
-                            this, [this, callback, connection](const QString &response) {
-            // Disconnect after receiving the response
-            QObject::disconnect(*connection);
-            delete connection;
-            
-            // Call the callback with the response
-            callback(response);
-        });
-    }
-    
-    emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
-}
-
-void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData, std::function<void(const QString&)> callback)
-{
-    qDebug() << "Preparing to send message with image to Claude...";
-    
-    if (anthropicApiKey.isEmpty()) {
-        qDebug() << "Error: API key is empty";
-        appendMessage("Error: API key not found. Please check your .env file.", false);
-        return;
-    }
-
-    // Convert image to base64
-    QString base64Image = QString::fromLatin1(imageData.toBase64());
-    
-    // Prepare the messages array with proper format
-    QJsonArray messages;
-    for (const auto &msg : messageHistory) {
+    if (imageData.isEmpty()) {
+        // Text-only message
         messages.append(QJsonObject{
-            {"role", msg.role == "user" ? "user" : "assistant"},
-            {"content", msg.content}
+            {"role", "user"},
+            {"content", message}
+        });
+    } else {
+        // Message with image
+        QString base64Image = QString::fromLatin1(imageData.toBase64());
+        
+        QJsonObject source;
+        source.insert("type", "base64");
+        source.insert("media_type", "image/png");
+        source.insert("data", base64Image);
+
+        QJsonObject imageContent;
+        imageContent.insert("type", "image");
+        imageContent.insert("source", source);
+
+        QJsonObject textContent;
+        textContent.insert("type", "text");
+        textContent.insert("text", message);
+
+        QJsonArray contentArray;
+        contentArray.append(imageContent);
+        contentArray.append(textContent);
+
+        messages.append(QJsonObject{
+            {"role", "user"},
+            {"content", contentArray}
         });
     }
-
-    // Create message with image
-    QJsonObject source;
-    source.insert("type", "base64");
-    source.insert("media_type", "image/png");
-    source.insert("data", base64Image);
-
-    QJsonObject imageContent;
-    imageContent.insert("type", "image");
-    imageContent.insert("source", source);
-
-    QJsonObject textContent;
-    textContent.insert("type", "text");
-    textContent.insert("text", message);
-
-    QJsonArray contentArray;
-    contentArray.append(imageContent);
-    contentArray.append(textContent);
-
-    // Add the current message with image
-    messages.append(QJsonObject{
-        {"role", "user"},
-        {"content", contentArray}
-    });
 
     qDebug() << "Message history size:" << messages.size();
     
