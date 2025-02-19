@@ -161,6 +161,7 @@ private:
     void appendMessage(const QString &message, bool isUser = true);
     void appendMessageToView(const QString &message, bool isUser);
     void sendToClaude(const QString &message);
+    void sendToClaude(const QString &message, const QByteArray &imageData);  // Overload for image data
     QString getDatabasePath();
     void loadChats();
     void createNewChat();

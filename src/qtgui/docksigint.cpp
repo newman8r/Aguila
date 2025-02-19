@@ -54,6 +54,10 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
     request.setRawHeader("x-api-key", apiKey.toUtf8());
     request.setRawHeader("anthropic-version", "2023-06-01");
 
+    qDebug() << "🌐 Sending request to Claude:";
+    qDebug() << "  - Model:" << model;
+    qDebug() << "  - Messages:" << messages.size();
+
     // Send the request and connect to its finished signal
     QNetworkReply *reply = networkManager->post(request, QJsonDocument(requestBody).toJson());
     
@@ -63,16 +67,21 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
             QJsonDocument jsonResponse = QJsonDocument::fromJson(response);
             QJsonObject jsonObject = jsonResponse.object();
 
+            qDebug() << "✅ Received response from Claude";
             if (jsonObject.contains("content")) {
                 QString assistantMessage = jsonObject["content"].toArray()[0].toObject()["text"].toString();
                 emit messageReceived(assistantMessage);
             }
             else {
-                emit errorOccurred("Error: Response does not contain 'content' field");
+                QString error = "Error: Response does not contain 'content' field";
+                qDebug() << "❌ " << error;
+                emit errorOccurred(error);
             }
         }
         else {
-            QString errorDetails = QString("Error: %1\nResponse: %2").arg(reply->errorString(), reply->readAll().constData());
+            QString errorDetails = QString("Error: %1\nResponse: %2")
+                                 .arg(reply->errorString(), reply->readAll().constData());
+            qDebug() << "❌ Network error:" << errorDetails;
             emit errorOccurred(errorDetails);
         }
         reply->deleteLater();
@@ -893,6 +902,56 @@ void DockSigint::sendToClaude(const QString &message)
     emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
 }
 
+void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData)
+{
+    qDebug() << "Preparing to send message with image to Claude...";
+    
+    if (anthropicApiKey.isEmpty()) {
+        qDebug() << "Error: API key is empty";
+        appendMessage("Error: API key not found. Please check your .env file.", false);
+        return;
+    }
+
+    // Convert image to base64
+    QString base64Image = QString::fromLatin1(imageData.toBase64());
+    
+    // Prepare the messages array with proper format
+    QJsonArray messages;
+    for (const auto &msg : messageHistory) {
+        messages.append(QJsonObject{
+            {"role", msg.role == "user" ? "user" : "assistant"},
+            {"content", msg.content}
+        });
+    }
+
+    // Create message with image
+    QJsonObject source;
+    source.insert("type", "base64");
+    source.insert("media_type", "image/png");
+    source.insert("data", base64Image);
+
+    QJsonObject imageContent;
+    imageContent.insert("type", "image");
+    imageContent.insert("source", source);
+
+    QJsonObject textContent;
+    textContent.insert("type", "text");
+    textContent.insert("text", message);
+
+    QJsonArray contentArray;
+    contentArray.append(imageContent);
+    contentArray.append(textContent);
+
+    // Add the current message with image
+    messages.append(QJsonObject{
+        {"role", "user"},
+        {"content", contentArray}
+    });
+
+    qDebug() << "Message history size:" << messages.size();
+    emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
+}
+
 void DockSigint::onWorkerMessageReceived(const QString &message)
 {
     appendMessage(message, false);
@@ -1426,6 +1485,38 @@ void DockSigint::captureWaterfallScreenshot()
             message += QString("📡 Center Frequency: %1 MHz\n").arg(centerFreq / 1e6, 0, 'f', 3);
             message += QString("📏 Capture width: %1 pixels").arg(sliceWidth);
             appendMessage(message, false);
+
+            // Prepare signal analysis request to Claude
+            QFile imageFile(filepath);
+            if (imageFile.open(QIODevice::ReadOnly)) {
+                QByteArray imageData = imageFile.readAll();
+                imageFile.close();
+
+                // Create analysis prompt
+                QString analysisPrompt = QString(
+                    "Please interpret this waterfall signal data produced in GQRX:\n\n"
+                    "📡 Signal Parameters:\n"
+                    "- Center Frequency: %1 MHz\n"
+                    "- Bandwidth: %2 kHz\n"
+                    "- Location: Austin, TX\n\n"
+                    "Please analyze this signal and tell me:\n"
+                    "1. The likely signal type(s)\n"
+                    "2. Any modulation characteristics you can identify\n"
+                    "3. Potential sources or applications\n"
+                    "4. Signal quality assessment\n\n"
+                    "If you're unsure about the precise signal type, please provide several likely possibilities. "
+                    "Include any other relevant observations about the signal pattern, strength, or unique characteristics."
+                ).arg(centerFreq / 1e6, 0, 'f', 3)
+                 .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
+
+                // Send to Claude with image
+                appendMessage("🔍 Analyzing signal pattern...", false);
+                sendToClaude(analysisPrompt, imageData);
+            } else {
+                QString error = "Failed to read screenshot for analysis";
+                qDebug() << "❌ Error:" << error;
+                appendMessage("❌ Error: " + error, false);
+            }
         } else {
             QString error = "Failed to save screenshot to " + filepath;
             qDebug() << "❌ Error:" << error;
