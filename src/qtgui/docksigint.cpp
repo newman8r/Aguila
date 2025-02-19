@@ -1537,8 +1537,7 @@ void DockSigint::captureWaterfallScreenshot()
                     "📡 Signal Parameters:\n"
                     "- Center Frequency: %1 MHz\n"
                     "- Filter Bandwidth: %2 kHz\n"
-                    "- Sample Rate: %3 MHz\n"
-                    "- Capture Width: %4 kHz\n\n"
+                    "- Sample Rate: %3 MHz\n\n"
                     "Please analyze this signal and tell me:\n"
                     "1. The likely signal type(s)\n"
                     "2. Any modulation characteristics you can identify\n"
@@ -1548,8 +1547,7 @@ void DockSigint::captureWaterfallScreenshot()
                     "Include any other relevant observations about the signal pattern, strength, or unique characteristics."
                 ).arg(demodFreq / 1e6, 0, 'f', 6)
                  .arg(filterBandwidth / 1e3, 0, 'f', 2)
-                 .arg(sampleRate / 1e6, 0, 'f', 3)
-                 .arg(captureWidthHz / 1e3, 0, 'f', 2);
+                 .arg(sampleRate / 1e6, 0, 'f', 3);
 
                 qDebug() << "\n📝 Analysis Prompt:";
                 qDebug().noquote() << analysisPrompt;
