@@ -54,6 +54,8 @@ public slots:
     void loadChatHistory(int chatId);
     void loadAllChats();
     void createChat(const QString &name);
+    void saveSetting(const QString &key, const QString &value);
+    void loadSetting(const QString &key);
 
 signals:
     void messageSaved(qint64 id);
@@ -61,6 +63,7 @@ signals:
     void chatsLoaded(const QVector<QPair<int, QString>> &chats);
     void chatCreated(int chatId, const QString &name);
     void error(const QString &message);
+    void settingLoaded(const QString &key, const QString &value);
 
 private:
     QSqlDatabase db;
@@ -171,6 +174,13 @@ private:
     void clearChat();
     void setupTabSystem();
     void moveVisualizerToTab();
+
+    // Add new member variables
+    bool m_lastActiveChatLoaded;
+    bool m_chatsLoaded;
+    
+    // Add new member function
+    void switchToLastActiveChat();
 };
 
 #endif // DOCKSIGINT_H 

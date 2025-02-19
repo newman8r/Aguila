@@ -142,6 +142,17 @@ DatabaseWorker::DatabaseWorker(const QString &dbPath, QObject *parent) : QObject
             return;
         }
 
+        // Create settings table
+        if (!query.exec("CREATE TABLE IF NOT EXISTS settings ("
+                       "key TEXT PRIMARY KEY,"
+                       "value TEXT NOT NULL,"
+                       "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                       ")")) {
+            qDebug() << "❌ Failed to create settings table:" << query.lastError().text();
+            db.rollback();
+            return;
+        }
+
         // Create default chat if it doesn't exist
         if (!query.exec("INSERT OR IGNORE INTO chats (id, name) VALUES (1, 'Chat 1')")) {
             qDebug() << "❌ Failed to create default chat:" << query.lastError().text();
@@ -338,6 +349,67 @@ void DatabaseWorker::createChat(const QString &name)
     
     qDebug() << "✅ Created new chat with ID:" << chatId;
     emit chatCreated(chatId, name);
+}
+
+void DatabaseWorker::saveSetting(const QString &key, const QString &value)
+{
+    qDebug() << "\n=== 💾 Saving Setting ===";
+    qDebug() << "Key:" << key;
+    qDebug() << "Value:" << value;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)");
+    query.addBindValue(key);
+    query.addBindValue(value);
+
+    if (!query.exec()) {
+        QString error = "Error saving setting: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    qDebug() << "✅ Setting saved successfully";
+}
+
+void DatabaseWorker::loadSetting(const QString &key)
+{
+    qDebug() << "\n=== 📚 Loading Setting ===";
+    qDebug() << "Key:" << key;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("SELECT value FROM settings WHERE key = ?");
+    query.addBindValue(key);
+
+    if (!query.exec()) {
+        QString error = "Error loading setting: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    if (query.next()) {
+        QString value = query.value(0).toString();
+        qDebug() << "✅ Setting loaded:" << value;
+        emit settingLoaded(key, value);
+    } else {
+        qDebug() << "⚠️ Setting not found";
+        emit settingLoaded(key, QString());
+    }
 }
 
 DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
@@ -546,6 +618,31 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
         }
         ui->chatSelector->blockSignals(false);
     });
+    connect(databaseWorker, &DatabaseWorker::settingLoaded, this, [this](const QString &key, const QString &value) {
+        if (key == "last_active_chat" && !value.isEmpty()) {
+            qDebug() << "\n=== 📢 Last Active Chat Setting Loaded ===";
+            int chatId = value.toInt();
+            qDebug() << "  - Loaded chat ID:" << chatId;
+            
+            if (chatId > 0) {
+                m_lastActiveChatLoaded = true;
+                currentChatId = chatId;
+                qDebug() << "  - Set currentChatId to:" << currentChatId;
+                
+                // If chats are already loaded, switch to this chat
+                if (m_chatsLoaded) {
+                    qDebug() << "  - Chats already loaded, switching to chat:" << chatId;
+                    switchToLastActiveChat();
+                } else {
+                    qDebug() << "  - Waiting for chats to load before switching";
+                }
+            }
+            qDebug() << "=================================\n";
+        }
+    });
+    connect(databaseWorker, &DatabaseWorker::settingLoaded, this, [this](const QString &key, const QString &value) {
+        // Handle other settings as needed
+    });
     databaseThread.start();
     qDebug() << "✅ Database worker started";
 
@@ -611,6 +708,9 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
 
     // Load existing chats
     databaseWorker->loadAllChats();
+    
+    // Load last active chat setting
+    databaseWorker->loadSetting("last_active_chat");
 
     // Initialize tab system
     currentTab = "spectrum";
@@ -636,6 +736,10 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     qDebug() << "Model:" << currentModel;
     qDebug() << "API Key status:" << (!anthropicApiKey.isEmpty() ? "Found" : "Missing");
     qDebug() << "=================================\n";
+
+    // Add at the start of the class implementation, after member initialization
+    m_lastActiveChatLoaded = false;
+    m_chatsLoaded = false;
 }
 
 DockSigint::~DockSigint()
@@ -1069,6 +1173,9 @@ void DockSigint::switchToChat(int chatId)
     messageHistory.clear();
     clearChat();
     emit loadHistoryFromDb(currentChatId);
+    
+    // Save the last active chat
+    databaseWorker->saveSetting("last_active_chat", QString::number(chatId));
 }
 
 void DockSigint::updateChatSelector()
@@ -1105,14 +1212,32 @@ void DockSigint::onChatSelected(int index)
 
 void DockSigint::onChatsLoaded(const QVector<QPair<int, QString>> &chats)
 {
+    qDebug() << "\n=== 📚 Chats Loaded ===";
+    qDebug() << "  - Number of chats:" << chats.size();
+    qDebug() << "  - Last active chat loaded:" << m_lastActiveChatLoaded;
+    qDebug() << "  - Current chat ID:" << currentChatId;
+    
     chatList.clear();
     for (const auto &chat : chats) {
         Chat newChat;
         newChat.id = chat.first;
         newChat.name = chat.second;
         chatList.append(newChat);
+        qDebug() << "  - Loaded chat:" << newChat.id << "-" << newChat.name;
     }
+    
+    // Update the selector with all chats
     updateChatSelector();
+    m_chatsLoaded = true;
+    
+    // If we have a last active chat, switch to it
+    if (m_lastActiveChatLoaded) {
+        qDebug() << "  - Have last active chat, switching to:" << currentChatId;
+        switchToLastActiveChat();
+    } else {
+        qDebug() << "  - No last active chat, staying with current:" << currentChatId;
+    }
+    qDebug() << "=================================\n";
 }
 
 void DockSigint::onCaptureStarted(const SpectrumCapture::CaptureRange& range)
@@ -1623,4 +1748,39 @@ void DockSigint::captureWaterfallScreenshot()
         qDebug() << "❌ Error:" << error;
         appendMessage("❌ Error: " + error, false);
     }
+}
+
+void DockSigint::switchToLastActiveChat()
+{
+    qDebug() << "\n=== 🔄 Switching to Last Active Chat ===";
+    qDebug() << "  - Target chat ID:" << currentChatId;
+    
+    // Find if this chat exists
+    bool found = false;
+    for (const auto &chat : chatList) {
+        if (chat.id == currentChatId) {
+            found = true;
+            break;
+        }
+    }
+    
+    if (found) {
+        qDebug() << "  - Chat found, performing switch";
+        // Switch to the last active chat
+        switchToChat(currentChatId);
+        
+        // Update the selector to show the correct chat
+        int index = ui->chatSelector->findData(currentChatId);
+        if (index != -1) {
+            qDebug() << "  - Updating selector to index:" << index;
+            ui->chatSelector->blockSignals(true);
+            ui->chatSelector->setCurrentIndex(index);
+            ui->chatSelector->blockSignals(false);
+        } else {
+            qDebug() << "  ⚠️ Chat index not found in selector!";
+        }
+    } else {
+        qDebug() << "  ⚠️ Chat" << currentChatId << "not found in chat list!";
+    }
+    qDebug() << "=================================\n";
 } 
