@@ -1459,192 +1459,75 @@ QWidget* DockSigint::findWaterfallWidget() const
 void DockSigint::captureWaterfallScreenshot()
 {
     qDebug() << "\n=== 📸 Capturing Waterfall Screenshot ===";
-    appendMessage("📸 Attempting to capture waterfall screenshot...", false);
     
+    // Find the waterfall widget
     QWidget* waterfallWidget = findWaterfallWidget();
     if (!waterfallWidget) {
-        QString error = "Could not find waterfall widget";
-        qDebug() << "❌ Error:" << error;
-        appendMessage("❌ Error: " + error, false);
+        appendMessage("❌ Error: Could not find waterfall widget", false);
         return;
     }
 
-    try {
-        // Get the screenshot path
-        QString filepath = getScreenshotPath();
-        if (filepath.isEmpty()) {
-            QString error = "Failed to create screenshots directory";
-            qDebug() << "❌ Error:" << error;
-            appendMessage("❌ Error: " + error, false);
-            return;
-        }
+    // Get the plotter
+    auto *plotter = qobject_cast<CPlotter*>(waterfallWidget);
+    if (!plotter) {
+        appendMessage("❌ Error: Could not access plotter functions", false);
+        return;
+    }
 
-        // Cast to CPlotter and get frequency
-        auto *plotter = qobject_cast<CPlotter*>(waterfallWidget);
-        if (!plotter) {
-            QString error = "Could not access plotter functions";
-            qDebug() << "❌ Error:" << error;
-            appendMessage("❌ Error: " + error, false);
-            return;
-        }
-
-        // Get the actual demodulator frequency
-        double demodFreq = plotter->getDemodCenterFreq();
-        
-        // Calculate the area to capture
-        QRect widgetRect = waterfallWidget->rect();
-        // Get the x-coordinate for the demodulator frequency using public methods
-        int centerX = plotter->xFromFreq(demodFreq);
-        int sliceWidth = 100;  // Width of the slice to capture (adjust as needed)
-        
-        qDebug() << "📊 Capture parameters:";
-        qDebug() << "  - Widget size:" << widgetRect.size();
-        qDebug() << "  - Demod X:" << centerX;
-        qDebug() << "  - Slice width:" << sliceWidth;
-        
-        // Create a rect for the slice around the demodulator position
-        QRect captureRect(
-            centerX - sliceWidth/2,  // Left edge
-            0,                       // Top edge
-            sliceWidth,             // Width
-            widgetRect.height()      // Full height
-        );
-        
-        qDebug() << "  - Capture rect:" << captureRect;
-        
-        // Capture the widget
-        QPixmap screenshot = waterfallWidget->grab(captureRect);
-        
-        // Save the screenshot
-        if (screenshot.save(filepath, "PNG")) {
-            qDebug() << "✅ Screenshot saved successfully";
-            QString message = QString("✅ Waterfall screenshot saved!\n");
-            message += QString("📂 Location: %1\n").arg(filepath);
-            message += QString("📡 Frequency: %1 MHz\n").arg(demodFreq / 1e6, 0, 'f', 3);
-            message += QString("📏 Capture width: %1 pixels").arg(sliceWidth);
-            appendMessage(message, false);
-
-            // Prepare signal analysis request to Claude
+    // Get the frequency
+    double demodFreq = plotter->getDemodCenterFreq();
+    
+    // Set up capture parameters
+    QRect widgetRect = waterfallWidget->rect();
+    int centerX = plotter->xFromFreq(demodFreq);
+    int sliceWidth = 100;  // Width of the slice to capture
+    
+    // Create capture rectangle
+    QRect captureRect(
+        centerX - sliceWidth/2,
+        0,
+        sliceWidth,
+        widgetRect.height()
+    );
+    
+    // Capture the widget
+    QPixmap screenshot = waterfallWidget->grab(captureRect);
+    
+    // Save to temp file
+    QTemporaryFile tempFile;
+    tempFile.setAutoRemove(false);
+    if (tempFile.open()) {
+        QString filepath = tempFile.fileName();
+        if (screenshot.save(&tempFile, "PNG")) {
+            tempFile.close();
+            
+            // Read the image data
             QFile imageFile(filepath);
             if (imageFile.open(QIODevice::ReadOnly)) {
                 QByteArray imageData = imageFile.readAll();
                 imageFile.close();
-
-                // Create analysis prompt
+                
+                // Create simple analysis prompt
                 QString analysisPrompt = QString(
-                    "Please interpret this waterfall signal data produced in GQRX:\n\n"
-                    "📡 Signal Parameters:\n"
-                    "- Frequency: %1 MHz\n"
-                    "- Bandwidth: %2 kHz\n"
-                    "- Location: Austin, TX\n\n"
-                    "Please analyze this signal and tell me:\n"
-                    "1. The likely signal type(s)\n"
-                    "2. Any modulation characteristics you can identify\n"
-                    "3. Potential sources or applications\n"
-                    "4. Signal quality assessment\n\n"
-                    "If you're unsure about the precise signal type, please provide several likely possibilities. "
-                    "Include any other relevant observations about the signal pattern, strength, or unique characteristics."
+                    "Please analyze this waterfall signal data from GQRX. "
+                    "Frequency: %1 MHz, Bandwidth: %2 kHz. "
+                    "What type of signal is this and what are its key characteristics?"
                 ).arg(demodFreq / 1e6, 0, 'f', 3)
                  .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
 
-                // Create summary prompt
-                QString summaryPrompt = QString(
-                    "Based on this waterfall signal data at %1 MHz with %2 kHz bandwidth, "
-                    "provide ONLY a single phrase (less than 8 words) identifying the most likely signal type. "
-                    "Example responses:\n"
-                    "- Commercial FM Radio Station\n"
-                    "- Digital Mobile Radio (DMR)\n"
-                    "- NOAA Weather Satellite\n"
-                    "- ADS-B Aircraft Transponder\n"
-                    "Respond ONLY with the signal type, no additional explanation."
-                ).arg(demodFreq / 1e6, 0, 'f', 3)
-                 .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
-
-                // Add loading spinner and placeholder for summary
-                QString loadingHtml = QString(
-                    "<div class='signal-analysis-header loading'>"
-                    "<div class='spinner'></div>"
-                    "<span>Analyzing signal type...</span>"
-                    "</div>"
-                );
-                appendMessageToView(loadingHtml, false);
-
-                // Send initial analysis to Claude
-                appendMessage("🔍 Analyzing signal pattern...", false);
-                sendToClaude(analysisPrompt, imageData, [this, summaryPrompt, imageData](const QString &response) {
-                    // After getting the detailed analysis, request the summary
-                    sendToClaude(summaryPrompt, imageData, [this](const QString &summaryResponse) {
-                        // Replace loading spinner with summary header
-                        QString summaryHtml = QString(
-                            "<div class='signal-analysis-header'>"
-                            "<span class='signal-type'>%1</span>"
-                            "</div>"
-                        ).arg(summaryResponse.trimmed());
-                        
-                        // Update the header via JavaScript
-                        webView->page()->runJavaScript(
-                            QString("document.querySelector('.loading').outerHTML = `%1`;")
-                            .arg(summaryHtml)
-                        );
-                    });
-                });
-
-                // Add CSS for the new elements to the base HTML
-                QString newStyles = R"(
-                    .signal-analysis-header {
-                        background: #2d2d2d;
-                        padding: 12px;
-                        margin: -16px -16px 16px -16px;
-                        border-radius: 8px 8px 0 0;
-                        border-bottom: 1px solid #3d3d3d;
-                    }
-                    .signal-analysis-header.loading {
-                        display: flex;
-                        align-items: center;
-                        gap: 12px;
-                    }
-                    .spinner {
-                        width: 20px;
-                        height: 20px;
-                        border: 3px solid #3d3d3d;
-                        border-top: 3px solid #569cd6;
-                        border-radius: 50%;
-                        animation: spin 1s linear infinite;
-                    }
-                    .signal-type {
-                        color: #ff6b6b;
-                        font-weight: 600;
-                        font-size: 1.1em;
-                    }
-                    @keyframes spin {
-                        0% { transform: rotate(0deg); }
-                        100% { transform: rotate(360deg); }
-                    }
-                )";
-
-                // Add the styles to the base HTML
-                chatHtml.replace("</style>", newStyles + "\n</style>");
+                // Send to Claude
+                appendMessage("🔍 Analyzing signal...", false);
+                sendToClaude(analysisPrompt, imageData);
             } else {
-                QString error = "Failed to read screenshot for analysis";
-                qDebug() << "❌ Error:" << error;
-                appendMessage("❌ Error: " + error, false);
+                appendMessage("❌ Error: Could not read captured image", false);
             }
+            
+            // Clean up
+            QFile::remove(filepath);
         } else {
-            QString error = "Failed to save screenshot to " + filepath;
-            qDebug() << "❌ Error:" << error;
-            appendMessage("❌ Error: " + error, false);
+            appendMessage("❌ Error: Could not save screenshot", false);
         }
+    } else {
+        appendMessage("❌ Error: Could not create temporary file", false);
     }
-    catch (const std::exception& e) {
-        QString error = QString("Exception during screenshot: %1").arg(e.what());
-        qDebug() << "❌ Error:" << error;
-        appendMessage("❌ Error: " + error, false);
-    }
-    catch (...) {
-        QString error = "Unknown error during screenshot capture";
-        qDebug() << "❌ Error:" << error;
-        appendMessage("❌ Error: " + error, false);
-    }
-    
-    qDebug() << "=== Screenshot Capture Complete ===\n";
 } 
