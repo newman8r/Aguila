@@ -107,49 +107,57 @@ DatabaseWorker::DatabaseWorker(const QString &dbPath, QObject *parent) : QObject
     db = QSqlDatabase::addDatabase("QSQLITE", connectionName);
     db.setDatabaseName(dbPath);
 
-    if (!db.open()) {
+    // Set pragmas for better concurrency handling
+    if (db.open()) {
+        QSqlQuery query(db);
+        query.exec("PRAGMA journal_mode = WAL");  // Write-Ahead Logging for better concurrency
+        query.exec("PRAGMA busy_timeout = 5000");  // 5 second timeout for busy/locked DB
+        query.exec("PRAGMA synchronous = NORMAL");  // Balanced durability/speed
+        
+        // Create tables in a single transaction
+        db.transaction();
+        
+        // Create chats table
+        if (!query.exec("CREATE TABLE IF NOT EXISTS chats ("
+                       "id INTEGER PRIMARY KEY,"
+                       "name TEXT NOT NULL,"
+                       "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+                       ")")) {
+            qDebug() << "❌ Failed to create chats table:" << query.lastError().text();
+            db.rollback();
+            return;
+        }
+
+        // Create messages table
+        if (!query.exec("CREATE TABLE IF NOT EXISTS messages ("
+                       "id INTEGER PRIMARY KEY,"
+                       "chat_id INTEGER,"
+                       "role TEXT NOT NULL,"
+                       "content TEXT NOT NULL,"
+                       "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
+                       "FOREIGN KEY (chat_id) REFERENCES chats(id)"
+                       ")")) {
+            qDebug() << "❌ Failed to create messages table:" << query.lastError().text();
+            db.rollback();
+            return;
+        }
+
+        // Create default chat if it doesn't exist
+        if (!query.exec("INSERT OR IGNORE INTO chats (id, name) VALUES (1, 'Chat 1')")) {
+            qDebug() << "❌ Failed to create default chat:" << query.lastError().text();
+            db.rollback();
+            return;
+        }
+
+        if (!db.commit()) {
+            qDebug() << "❌ Failed to commit initial transaction:" << db.lastError().text();
+            db.rollback();
+        }
+        
+        qDebug() << "✅ Database initialized successfully with WAL mode and busy timeout";
+    } else {
         qDebug() << "❌ Failed to open database:" << db.lastError().text();
-        return;
     }
-
-    // Create tables in a single transaction
-    db.transaction();
-    QSqlQuery query(db);
-    
-    // Create chats table
-    if (!query.exec("CREATE TABLE IF NOT EXISTS chats ("
-                   "id INTEGER PRIMARY KEY,"
-                   "name TEXT NOT NULL,"
-                   "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
-                   ")")) {
-        qDebug() << "❌ Failed to create chats table:" << query.lastError().text();
-        db.rollback();
-        return;
-    }
-
-    // Create messages table
-    if (!query.exec("CREATE TABLE IF NOT EXISTS messages ("
-                   "id INTEGER PRIMARY KEY,"
-                   "chat_id INTEGER,"
-                   "role TEXT NOT NULL,"
-                   "content TEXT NOT NULL,"
-                   "timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,"
-                   "FOREIGN KEY (chat_id) REFERENCES chats(id)"
-                   ")")) {
-        qDebug() << "❌ Failed to create messages table:" << query.lastError().text();
-        db.rollback();
-        return;
-    }
-
-    // Create default chat if it doesn't exist
-    if (!query.exec("INSERT OR IGNORE INTO chats (id, name) VALUES (1, 'Chat 1')")) {
-        qDebug() << "❌ Failed to create default chat:" << query.lastError().text();
-        db.rollback();
-        return;
-    }
-
-    db.commit();
-    qDebug() << "✅ Database initialized successfully";
 }
 
 DatabaseWorker::~DatabaseWorker()
@@ -169,17 +177,25 @@ void DatabaseWorker::saveMessage(int chatId, const QString &role, const QString 
     qDebug() << "👤 Role:" << role;
     qDebug() << "📝 Content:" << content.left(50) + "...";
 
-    if (!db.isOpen() && !db.open()) {
-        QString error = "Database not open: " + db.lastError().text();
+    // Ensure database connection is valid
+    if (!db.isOpen()) {
+        if (!db.open()) {
+            QString error = "Database not open: " + db.lastError().text();
+            qDebug() << "❌ " << error;
+            emit this->error(error);
+            return;
+        }
+    }
+
+    // Use a unique transaction for this save operation
+    if (!db.transaction()) {
+        QString error = "Failed to start transaction: " + db.lastError().text();
         qDebug() << "❌ " << error;
         emit this->error(error);
         return;
     }
 
-    db.transaction();
     QSqlQuery query(db);
-
-    // Insert message
     query.prepare("INSERT INTO messages (chat_id, role, content) VALUES (?, ?, ?)");
     query.addBindValue(chatId);
     query.addBindValue(role);
@@ -204,10 +220,18 @@ void DatabaseWorker::saveMessage(int chatId, const QString &role, const QString 
         qDebug() << "   Chat ID:" << query.value(1).toInt();
         qDebug() << "   Role:" << query.value(2).toString();
         qDebug() << "   Content:" << query.value(3).toString().left(50) + "...";
-        db.commit();
+        
+        if (!db.commit()) {
+            QString error = "Failed to commit transaction: " + db.lastError().text();
+            qDebug() << "❌ " << error;
+            db.rollback();
+            emit this->error(error);
+            return;
+        }
+        
         emit messageSaved(id);
     } else {
-        QString error = "Failed to verify saved message";
+        QString error = "Failed to verify saved message: " + query.lastError().text();
         qDebug() << "❌ " << error;
         db.rollback();
         emit this->error(error);
