@@ -307,10 +307,18 @@ void DatabaseWorker::createChat(const QString &name)
 DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     QDockWidget(parent),
     ui(new Ui::DockSigint),
+    webView(nullptr),
+    networkWorker(nullptr),
+    databaseWorker(nullptr),
     currentChatId(1),
     rx_ptr(rx_ptr),
-    dsp_running(false),  // Initialize DSP state
-    waterfallDisplay(nullptr)  // Initialize waterfall display
+    spectrumCapture(nullptr),
+    spectrumVisualizer(nullptr),
+    waterfallDisplay(nullptr),
+    dsp_running(false),
+    currentTab("spectrum"),
+    spectrumContainer(nullptr),
+    waterfallContainer(nullptr)
 {
     qDebug() << "\n=== 🚀 SIGINT Panel Starting Up 🚀 ===";
     
@@ -528,6 +536,10 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     // Add spectrum capture test shortcut
     auto *captureShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
     connect(captureShortcut, &QShortcut::activated, this, &DockSigint::testSpectrumCapture);
+
+    // Add screenshot shortcut (Ctrl+P)
+    auto *screenshotShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_P), this);
+    connect(screenshotShortcut, &QShortcut::activated, this, &DockSigint::captureWaterfallScreenshot);
 
     // Load existing chats
     databaseWorker->loadAllChats();
@@ -1234,4 +1246,132 @@ void DockSigint::onNewFFTData(const std::vector<float>& fft_data, double center_
         qDebug() << "Bandwidth:" << bandwidth << "Hz";
         waterfallDisplay->updateData(fft_data, center_freq, bandwidth, sample_rate);
     }
+}
+
+QString DockSigint::getScreenshotPath() const
+{
+    // Create screenshots directory in the config folder
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/gqrx/screenshots";
+    
+    // Create directory if it doesn't exist
+    QDir dir(configDir);
+    if (!dir.exists()) {
+        qDebug() << "📁 Creating screenshots directory:" << configDir;
+        if (!dir.mkpath(".")) {
+            qDebug() << "❌ Failed to create screenshots directory";
+            return QString();
+        }
+    }
+    
+    // Generate filename with timestamp and frequency
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    double centerFreq = spectrumCapture->getCurrentCenterFreq();
+    
+    QString filepath = QString("%1/waterfall_%2_%3MHz.png")
+            .arg(configDir)
+            .arg(timestamp)
+            .arg(centerFreq / 1e6, 0, 'f', 3);
+            
+    qDebug() << "📸 Screenshot will be saved to:" << filepath;
+    return filepath;
+}
+
+QWidget* DockSigint::findWaterfallWidget() const
+{
+    QWidget* mainWindow = qobject_cast<QWidget*>(parent());
+    if (!mainWindow) return nullptr;
+    
+    // Get the main window
+    while (mainWindow && !qobject_cast<MainWindow*>(mainWindow)) {
+        mainWindow = mainWindow->parentWidget();
+    }
+    
+    if (!mainWindow) return nullptr;
+    
+    // Find the waterfall widget by searching through children
+    QList<QWidget*> widgets = mainWindow->findChildren<QWidget*>();
+    for (QWidget* widget : widgets) {
+        if (widget->objectName() == "plotter") {
+            return widget;
+        }
+    }
+    
+    return nullptr;
+}
+
+void DockSigint::captureWaterfallScreenshot()
+{
+    qDebug() << "\n=== 📸 Capturing Waterfall Screenshot ===";
+    appendMessage("📸 Attempting to capture waterfall screenshot...", false);
+    
+    QWidget* waterfallWidget = findWaterfallWidget();
+    if (!waterfallWidget) {
+        QString error = "Could not find waterfall widget";
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
+        return;
+    }
+
+    try {
+        // Get the screenshot path
+        QString filepath = getScreenshotPath();
+        if (filepath.isEmpty()) {
+            QString error = "Failed to create screenshots directory";
+            qDebug() << "❌ Error:" << error;
+            appendMessage("❌ Error: " + error, false);
+            return;
+        }
+
+        // Get the center frequency and selector position
+        double centerFreq = spectrumCapture->getCurrentCenterFreq();
+        
+        // Calculate the area to capture
+        QRect widgetRect = waterfallWidget->rect();
+        int centerX = widgetRect.width() / 2;  // Center of the widget
+        int sliceWidth = 100;  // Width of the slice to capture (adjust as needed)
+        
+        qDebug() << "📊 Capture parameters:";
+        qDebug() << "  - Widget size:" << widgetRect.size();
+        qDebug() << "  - Center X:" << centerX;
+        qDebug() << "  - Slice width:" << sliceWidth;
+        
+        // Create a rect for the slice around the center
+        QRect captureRect(
+            centerX - sliceWidth/2,  // Left edge
+            0,                       // Top edge
+            sliceWidth,             // Width
+            widgetRect.height()      // Full height
+        );
+        
+        qDebug() << "  - Capture rect:" << captureRect;
+        
+        // Capture the widget
+        QPixmap screenshot = waterfallWidget->grab(captureRect);
+        
+        // Save the screenshot
+        if (screenshot.save(filepath, "PNG")) {
+            qDebug() << "✅ Screenshot saved successfully";
+            QString message = QString("✅ Waterfall screenshot saved!\n");
+            message += QString("📂 Location: %1\n").arg(filepath);
+            message += QString("📡 Center Frequency: %1 MHz\n").arg(centerFreq / 1e6, 0, 'f', 3);
+            message += QString("📏 Capture width: %1 pixels").arg(sliceWidth);
+            appendMessage(message, false);
+        } else {
+            QString error = "Failed to save screenshot to " + filepath;
+            qDebug() << "❌ Error:" << error;
+            appendMessage("❌ Error: " + error, false);
+        }
+    }
+    catch (const std::exception& e) {
+        QString error = QString("Exception during screenshot: %1").arg(e.what());
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
+    }
+    catch (...) {
+        QString error = "Unknown error during screenshot capture";
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
+    }
+    
+    qDebug() << "=== Screenshot Capture Complete ===\n";
 } 

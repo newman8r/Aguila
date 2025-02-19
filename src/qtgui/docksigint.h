@@ -123,6 +123,11 @@ private:
         QDateTime createdAt;
     };
 
+    // Screenshot functionality
+    QString getScreenshotPath() const;
+    void captureWaterfallScreenshot();
+    QWidget* findWaterfallWidget() const;
+
     Ui::DockSigint *ui;
     QWebEngineView *webView;
     NetworkWorker *networkWorker;
