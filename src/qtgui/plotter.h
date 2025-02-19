@@ -51,6 +51,11 @@ public:
     void setFreqUnits(qint32 unit) { m_FreqUnits = unit; }
 
     void setDemodCenterFreq(quint64 f) { m_DemodCenterFreq = f; }
+    quint64 getDemodCenterFreq() const { return m_DemodCenterFreq; }
+
+    // Coordinate conversion methods
+    int xFromFreq(qint64 freq);
+    qint64 freqFromX(int x);
 
     /*! \brief Move the filter to freq_hz from center. */
     void setFilterOffset(qint64 freq_hz)
@@ -215,8 +220,6 @@ private:
 
     void        drawOverlay();
     void        makeFrequencyStrs();
-    int         xFromFreq(qint64 freq);
-    qint64      freqFromX(int x);
     void        zoomStepX(float factor, int x);
     static qint64      roundFreq(qint64 freq, int resolution);
     quint64     msecFromY(int y);

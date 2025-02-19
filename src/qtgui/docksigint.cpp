@@ -24,6 +24,7 @@
 #include "docksigint.h"
 #include "ui_docksigint.h"
 #include "waterfall_display.h"
+#include "plotter.h"
 
 // NetworkWorker implementation
 NetworkWorker::NetworkWorker(QObject *parent) : QObject(parent)
@@ -310,11 +311,18 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     webView(nullptr),
     networkWorker(nullptr),
     databaseWorker(nullptr),
+    networkThread(),
+    databaseThread(),
+    anthropicApiKey(),
+    currentModel(),
     currentChatId(1),
-    rx_ptr(rx_ptr),
+    messageHistory(),
+    chatList(),
+    chatHtml(),
     spectrumCapture(nullptr),
     spectrumVisualizer(nullptr),
     waterfallDisplay(nullptr),
+    rx_ptr(rx_ptr),
     dsp_running(false),
     currentTab("spectrum"),
     spectrumContainer(nullptr),
@@ -1325,17 +1333,27 @@ void DockSigint::captureWaterfallScreenshot()
         // Get the center frequency and selector position
         double centerFreq = spectrumCapture->getCurrentCenterFreq();
         
+        // Cast to CPlotter to access plotter functions
+        auto *plotter = qobject_cast<CPlotter*>(waterfallWidget);
+        if (!plotter) {
+            QString error = "Could not access plotter functions";
+            qDebug() << "❌ Error:" << error;
+            appendMessage("❌ Error: " + error, false);
+            return;
+        }
+        
         // Calculate the area to capture
         QRect widgetRect = waterfallWidget->rect();
-        int centerX = widgetRect.width() / 2;  // Center of the widget
+        // Get the x-coordinate for the demodulator frequency using public methods
+        int centerX = plotter->xFromFreq(plotter->getDemodCenterFreq());
         int sliceWidth = 100;  // Width of the slice to capture (adjust as needed)
         
         qDebug() << "📊 Capture parameters:";
         qDebug() << "  - Widget size:" << widgetRect.size();
-        qDebug() << "  - Center X:" << centerX;
+        qDebug() << "  - Demod X:" << centerX;
         qDebug() << "  - Slice width:" << sliceWidth;
         
-        // Create a rect for the slice around the center
+        // Create a rect for the slice around the demodulator position
         QRect captureRect(
             centerX - sliceWidth/2,  // Left edge
             0,                       // Top edge
