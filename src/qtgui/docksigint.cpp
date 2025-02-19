@@ -873,7 +873,7 @@ void DockSigint::appendMessageToView(const QString &message, bool isUser)
     webView->page()->runJavaScript(QString("appendMessage(`%1`);").arg(messageHtml));
 }
 
-void DockSigint::sendToClaude(const QString &message)
+void DockSigint::sendToClaude(const QString &message, std::function<void(const QString&)> callback)
 {
     qDebug() << "Preparing to send message to Claude...";
     
@@ -899,10 +899,25 @@ void DockSigint::sendToClaude(const QString &message)
     });
 
     qDebug() << "Message history size:" << messages.size();
+    
+    // Connect a one-time handler for the response if callback provided
+    if (callback) {
+        QMetaObject::Connection *connection = new QMetaObject::Connection;
+        *connection = connect(networkWorker, &NetworkWorker::messageReceived,
+                            this, [this, callback, connection](const QString &response) {
+            // Disconnect after receiving the response
+            QObject::disconnect(*connection);
+            delete connection;
+            
+            // Call the callback with the response
+            callback(response);
+        });
+    }
+    
     emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
 }
 
-void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData)
+void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData, std::function<void(const QString&)> callback)
 {
     qDebug() << "Preparing to send message with image to Claude...";
     
@@ -949,6 +964,21 @@ void DockSigint::sendToClaude(const QString &message, const QByteArray &imageDat
     });
 
     qDebug() << "Message history size:" << messages.size();
+    
+    // Connect a one-time handler for the response if callback provided
+    if (callback) {
+        QMetaObject::Connection *connection = new QMetaObject::Connection;
+        *connection = connect(networkWorker, &NetworkWorker::messageReceived,
+                            this, [this, callback, connection](const QString &response) {
+            // Disconnect after receiving the response
+            QObject::disconnect(*connection);
+            delete connection;
+            
+            // Call the callback with the response
+            callback(response);
+        });
+    }
+    
     emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
 }
 
@@ -1517,9 +1547,83 @@ void DockSigint::captureWaterfallScreenshot()
                 ).arg(demodFreq / 1e6, 0, 'f', 3)
                  .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
 
-                // Send to Claude with image
+                // Create summary prompt
+                QString summaryPrompt = QString(
+                    "Based on this waterfall signal data at %1 MHz with %2 kHz bandwidth, "
+                    "provide ONLY a single phrase (less than 8 words) identifying the most likely signal type. "
+                    "Example responses:\n"
+                    "- Commercial FM Radio Station\n"
+                    "- Digital Mobile Radio (DMR)\n"
+                    "- NOAA Weather Satellite\n"
+                    "- ADS-B Aircraft Transponder\n"
+                    "Respond ONLY with the signal type, no additional explanation."
+                ).arg(demodFreq / 1e6, 0, 'f', 3)
+                 .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
+
+                // Add loading spinner and placeholder for summary
+                QString loadingHtml = QString(
+                    "<div class='signal-analysis-header loading'>"
+                    "<div class='spinner'></div>"
+                    "<span>Analyzing signal type...</span>"
+                    "</div>"
+                );
+                appendMessageToView(loadingHtml, false);
+
+                // Send initial analysis to Claude
                 appendMessage("🔍 Analyzing signal pattern...", false);
-                sendToClaude(analysisPrompt, imageData);
+                sendToClaude(analysisPrompt, imageData, [this, summaryPrompt, imageData](const QString &response) {
+                    // After getting the detailed analysis, request the summary
+                    sendToClaude(summaryPrompt, imageData, [this](const QString &summaryResponse) {
+                        // Replace loading spinner with summary header
+                        QString summaryHtml = QString(
+                            "<div class='signal-analysis-header'>"
+                            "<span class='signal-type'>%1</span>"
+                            "</div>"
+                        ).arg(summaryResponse.trimmed());
+                        
+                        // Update the header via JavaScript
+                        webView->page()->runJavaScript(
+                            QString("document.querySelector('.loading').outerHTML = `%1`;")
+                            .arg(summaryHtml)
+                        );
+                    });
+                });
+
+                // Add CSS for the new elements to the base HTML
+                QString newStyles = R"(
+                    .signal-analysis-header {
+                        background: #2d2d2d;
+                        padding: 12px;
+                        margin: -16px -16px 16px -16px;
+                        border-radius: 8px 8px 0 0;
+                        border-bottom: 1px solid #3d3d3d;
+                    }
+                    .signal-analysis-header.loading {
+                        display: flex;
+                        align-items: center;
+                        gap: 12px;
+                    }
+                    .spinner {
+                        width: 20px;
+                        height: 20px;
+                        border: 3px solid #3d3d3d;
+                        border-top: 3px solid #569cd6;
+                        border-radius: 50%;
+                        animation: spin 1s linear infinite;
+                    }
+                    .signal-type {
+                        color: #ff6b6b;
+                        font-weight: 600;
+                        font-size: 1.1em;
+                    }
+                    @keyframes spin {
+                        0% { transform: rotate(0deg); }
+                        100% { transform: rotate(360deg); }
+                    }
+                )";
+
+                // Add the styles to the base HTML
+                chatHtml.replace("</style>", newStyles + "\n</style>");
             } else {
                 QString error = "Failed to read screenshot for analysis";
                 qDebug() << "❌ Error:" << error;

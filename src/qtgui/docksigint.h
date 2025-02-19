@@ -19,6 +19,7 @@
 #include <QThread>
 #include <QDateTime>
 #include <memory>
+#include <functional>
 
 // Worker class for network operations
 class NetworkWorker : public QObject
@@ -160,8 +161,8 @@ private:
     void updateChatView();
     void appendMessage(const QString &message, bool isUser = true);
     void appendMessageToView(const QString &message, bool isUser);
-    void sendToClaude(const QString &message);
-    void sendToClaude(const QString &message, const QByteArray &imageData);  // Overload for image data
+    void sendToClaude(const QString &message, std::function<void(const QString&)> callback = nullptr);
+    void sendToClaude(const QString &message, const QByteArray &imageData, std::function<void(const QString&)> callback = nullptr);
     QString getDatabasePath();
     void loadChats();
     void createNewChat();
