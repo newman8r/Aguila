@@ -530,8 +530,21 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
         newChat.id = chatId;
         newChat.name = name;
         chatList.append(newChat);
+        
+        // First switch to the new chat
+        currentChatId = chatId;
+        messageHistory.clear();
+        clearChat();
+        emit loadHistoryFromDb(chatId);
+        
+        // Then update the selector and force the correct selection
+        ui->chatSelector->blockSignals(true);
         updateChatSelector();
-        switchToChat(chatId);
+        int index = ui->chatSelector->findData(chatId);
+        if (index != -1) {
+            ui->chatSelector->setCurrentIndex(index);
+        }
+        ui->chatSelector->blockSignals(false);
     });
     databaseThread.start();
     qDebug() << "✅ Database worker started";
