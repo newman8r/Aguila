@@ -1384,12 +1384,20 @@ QString DockSigint::getScreenshotPath() const
     
     // Generate filename with timestamp and frequency
     QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
-    double centerFreq = spectrumCapture->getCurrentCenterFreq();
+    
+    // Find the plotter widget to get the demod frequency
+    QWidget* waterfallWidget = findWaterfallWidget();
+    double freq = 0.0;
+    if (waterfallWidget) {
+        if (auto *plotter = qobject_cast<CPlotter*>(waterfallWidget)) {
+            freq = plotter->getDemodCenterFreq();
+        }
+    }
     
     QString filepath = QString("%1/waterfall_%2_%3MHz.png")
             .arg(configDir)
             .arg(timestamp)
-            .arg(centerFreq / 1e6, 0, 'f', 3);
+            .arg(freq / 1e6, 0, 'f', 3);
             
     qDebug() << "📸 Screenshot will be saved to:" << filepath;
     return filepath;
@@ -1441,10 +1449,7 @@ void DockSigint::captureWaterfallScreenshot()
             return;
         }
 
-        // Get the center frequency and selector position
-        double centerFreq = spectrumCapture->getCurrentCenterFreq();
-        
-        // Cast to CPlotter to access plotter functions
+        // Cast to CPlotter and get frequency
         auto *plotter = qobject_cast<CPlotter*>(waterfallWidget);
         if (!plotter) {
             QString error = "Could not access plotter functions";
@@ -1452,11 +1457,14 @@ void DockSigint::captureWaterfallScreenshot()
             appendMessage("❌ Error: " + error, false);
             return;
         }
+
+        // Get the actual demodulator frequency
+        double demodFreq = plotter->getDemodCenterFreq();
         
         // Calculate the area to capture
         QRect widgetRect = waterfallWidget->rect();
         // Get the x-coordinate for the demodulator frequency using public methods
-        int centerX = plotter->xFromFreq(plotter->getDemodCenterFreq());
+        int centerX = plotter->xFromFreq(demodFreq);
         int sliceWidth = 100;  // Width of the slice to capture (adjust as needed)
         
         qDebug() << "📊 Capture parameters:";
@@ -1482,7 +1490,7 @@ void DockSigint::captureWaterfallScreenshot()
             qDebug() << "✅ Screenshot saved successfully";
             QString message = QString("✅ Waterfall screenshot saved!\n");
             message += QString("📂 Location: %1\n").arg(filepath);
-            message += QString("📡 Center Frequency: %1 MHz\n").arg(centerFreq / 1e6, 0, 'f', 3);
+            message += QString("📡 Frequency: %1 MHz\n").arg(demodFreq / 1e6, 0, 'f', 3);
             message += QString("📏 Capture width: %1 pixels").arg(sliceWidth);
             appendMessage(message, false);
 
@@ -1496,7 +1504,7 @@ void DockSigint::captureWaterfallScreenshot()
                 QString analysisPrompt = QString(
                     "Please interpret this waterfall signal data produced in GQRX:\n\n"
                     "📡 Signal Parameters:\n"
-                    "- Center Frequency: %1 MHz\n"
+                    "- Frequency: %1 MHz\n"
                     "- Bandwidth: %2 kHz\n"
                     "- Location: Austin, TX\n\n"
                     "Please analyze this signal and tell me:\n"
@@ -1506,7 +1514,7 @@ void DockSigint::captureWaterfallScreenshot()
                     "4. Signal quality assessment\n\n"
                     "If you're unsure about the precise signal type, please provide several likely possibilities. "
                     "Include any other relevant observations about the signal pattern, strength, or unique characteristics."
-                ).arg(centerFreq / 1e6, 0, 'f', 3)
+                ).arg(demodFreq / 1e6, 0, 'f', 3)
                  .arg(sliceWidth * (plotter->getSampleRate() / plotter->width()) / 1000, 0, 'f', 1);
 
                 // Send to Claude with image
