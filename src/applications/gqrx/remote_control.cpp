@@ -54,6 +54,8 @@ RemoteControl::RemoteControl(QObject *parent) :
     receiver_running = false;
     hamlib_compatible = false;
     is_audio_muted = false;
+    waterfall_min_db = -160.0f;
+    waterfall_max_db = 0.0f;
 
     rc_port = DEFAULT_RC_PORT;
     rc_allowed_hosts.append(DEFAULT_RC_ALLOWED_HOSTS);
@@ -671,7 +673,7 @@ QString RemoteControl::cmd_get_level(QStringList cmdlist)
         QStringList names;
         for(auto &g : gains)
             names.push_back(QString("%1_GAIN").arg(QString::fromStdString(g.name)));
-        answer = QString("SQL STRENGTH AF %1\n").arg(names.join(" "));
+        answer = QString("SQL STRENGTH AF WF_MIN_DB WF_MAX_DB %1\n").arg(names.join(" "));
     }
     else if (lvl.compare("STRENGTH", Qt::CaseInsensitive) == 0 || lvl.isEmpty())
     {
@@ -684,6 +686,14 @@ QString RemoteControl::cmd_get_level(QStringList cmdlist)
     else if (lvl.compare("AF", Qt::CaseInsensitive) == 0)
     {
         answer = QString("%1\n").arg((double)audio_gain, 0, 'f', 1);
+    }
+    else if (lvl.compare("WF_MIN_DB", Qt::CaseInsensitive) == 0)
+    {
+        answer = QString("%1\n").arg((double)waterfall_min_db, 0, 'f', 1);
+    }
+    else if (lvl.compare("WF_MAX_DB", Qt::CaseInsensitive) == 0)
+    {
+        answer = QString("%1\n").arg((double)waterfall_max_db, 0, 'f', 1);
     }
     else if (lvl.endsWith("_GAIN"))
     {
@@ -717,7 +727,7 @@ QString RemoteControl::cmd_set_level(QStringList cmdlist)
         QStringList names;
         for(auto &g : gains)
             names.push_back(QString("%1_GAIN").arg(QString::fromStdString(g.name)));
-        answer = QString("SQL AF %1\n").arg(names.join(" "));
+        answer = QString("SQL AF WF_MIN_DB WF_MAX_DB %1\n").arg(names.join(" "));
     }
     else if (lvl.compare("SQL", Qt::CaseInsensitive) == 0)
     {
@@ -743,6 +753,36 @@ QString RemoteControl::cmd_set_level(QStringList cmdlist)
             answer = QString("RPRT 0\n");
             new_audio_gain = std::max<float>(-80.0f, std::min<float>(50.0f, new_audio_gain));
             emit newAudioGain(new_audio_gain);
+        }
+        else
+        {
+            answer = QString("RPRT 1\n");
+        }
+    }
+    else if (lvl.compare("WF_MIN_DB", Qt::CaseInsensitive) == 0)
+    {
+        bool ok;
+        float min_db = cmdlist.value(2, "ERR").toFloat(&ok);
+        if (ok)
+        {
+            answer = QString("RPRT 0\n");
+            waterfall_min_db = std::max<float>(-160.0f, std::min<float>(0.0f, min_db));
+            emit waterfallRangeChanged(waterfall_min_db, waterfall_max_db);
+        }
+        else
+        {
+            answer = QString("RPRT 1\n");
+        }
+    }
+    else if (lvl.compare("WF_MAX_DB", Qt::CaseInsensitive) == 0)
+    {
+        bool ok;
+        float max_db = cmdlist.value(2, "ERR").toFloat(&ok);
+        if (ok)
+        {
+            answer = QString("RPRT 0\n");
+            waterfall_max_db = std::max<float>(-160.0f, std::min<float>(30.0f, max_db));
+            emit waterfallRangeChanged(waterfall_min_db, waterfall_max_db);
         }
         else
         {
@@ -1049,4 +1089,10 @@ QString RemoteControl::cmd_dump_state() const
         "0\n" /* RIG_PARM_NONE */
         /* Bit field list of set parm */
         "0\n" /* RIG_PARM_NONE */);
+}
+
+void RemoteControl::setWaterfallRange(float min, float max)
+{
+    waterfall_min_db = min;
+    waterfall_max_db = max;
 }
