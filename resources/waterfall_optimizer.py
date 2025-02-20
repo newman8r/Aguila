@@ -182,7 +182,7 @@ def optimize_waterfall(min_db: float = None, max_db: float = None) -> dict:
                     # Calculate optimal settings
                     settings = calculate_optimal_settings(current_settings)
             
-            # Apply settings
+            # Apply settings - set min first, then max to ensure proper slider update
             tc.set('WF_MIN_DB', settings['min_db'])
             logger.info(f"Set waterfall min dB to {settings['min_db']}")
             

@@ -358,6 +358,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     connect(remote, SIGNAL(newAudioMuted(bool)), uiDockAudio, SLOT(setAudioMuted(bool)));
     connect(uiDockAudio, SIGNAL(audioMuted(bool)), remote, SLOT(setAudioMuted(bool)));
     connect(remote, SIGNAL(waterfallRangeChanged(float,float)), ui->plotter, SLOT(setWaterfallRange(float,float)));
+    connect(remote, SIGNAL(waterfallRangeChanged(float,float)), uiDockFft, SLOT(setWaterfallRange(float,float)));
 
     rds_timer = new QTimer(this);
     connect(rds_timer, SIGNAL(timeout()), this, SLOT(rdsTimeout()));
