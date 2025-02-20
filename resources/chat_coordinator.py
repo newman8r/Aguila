@@ -8,13 +8,14 @@ from langchain.agents import AgentExecutor, create_react_agent
 from langchain_anthropic import ChatAnthropic
 from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langchain.tools import tool
-from typing import Dict, List
+from typing import Dict, List, Optional
 import os
 from dotenv import load_dotenv
 import sys
 from pathlib import Path
 import re
 from .tuning_tool import GqrxTuningTool
+import logging
 
 # Find and load the .env file
 def setup_environment():
@@ -147,138 +148,84 @@ class ChatCoordinator:
             ("assistant", "Let me analyze that request.")
         ])
 
-    def _parse_frequency(self, text: str) -> int:
+    def _parse_frequency(self, text: str) -> Optional[int]:
         """Extract frequency in Hz from text"""
-        # Common frequency patterns with more flexible matching
+        logger = logging.getLogger('ChatCoordinator')
+        logger.debug(f'Attempting to parse frequency from: {text}')
+        
+        # Common frequency patterns
         patterns = [
-            # Match "145 MHz", "145MHz", "145.5 MHz", etc.
-            r'(\d+(?:\.\d+)?)\s*(?:MHz|mhz|Mhz)',
-            # Match "7200 kHz", "7200kHz", etc.
-            r'(\d+(?:\.\d+)?)\s*(?:kHz|khz|Khz)',
-            # Match "145000000 Hz", etc.
-            r'(\d+(?:\.\d+)?)\s*(?:Hz|hz|Hz)',
-            # Match just the number if units are mentioned elsewhere
-            r'(\d+(?:\.\d+)?)'
+            (r'(?i)(\d+(?:\.\d+)?)\s*(?:FM|fm)', 'FM'),           # "103.5 FM"
+            (r'(?i)(\d+(?:\.\d+)?)\s*(?:MHz|mhz)', 'MHz'),        # "103.5 MHz"
+            (r'(?i)(\d+(?:\.\d+)?)\s*(?:kHz|khz)', 'kHz'),        # "7200 kHz"
+            (r'(?i)(\d+(?:\.\d+)?)\s*(?:Hz|hz)', 'Hz')            # "7200000 Hz"
         ]
         
-        # First try to find a frequency with units
-        for pattern in patterns[:-1]:  # Exclude the last pattern initially
-            match = re.search(pattern, text.replace(',', ''))  # Remove commas
+        for pattern, unit in patterns:
+            logger.debug(f'Trying pattern for {unit}: {pattern}')
+            match = re.search(pattern, text.replace(',', ''))
+            
             if match:
-                value = float(match.group(1))
-                if 'mhz' in pattern.lower():
-                    return int(value * 1_000_000)
-                elif 'khz' in pattern.lower():
-                    return int(value * 1_000)
-                else:
-                    return int(value)
+                try:
+                    value = float(match.group(1))
+                    logger.debug(f'Found match: {value} {unit}')
+                    
+                    # Convert to Hz based on unit
+                    if unit in ['FM', 'MHz']:
+                        result = int(value * 1_000_000)
+                    elif unit == 'kHz':
+                        result = int(value * 1_000)
+                    else:
+                        result = int(value)
+                        
+                    logger.debug(f'Converted to Hz: {result}')
+                    return result
+                    
+                except ValueError as e:
+                    logger.error(f'Error converting value: {e}')
+                    continue
         
-        # If no frequency with units found, check if MHz is mentioned elsewhere
-        if 'mhz' in text.lower() or 'MHz' in text:
-            match = re.search(patterns[-1], text.replace(',', ''))
-            if match:
-                value = float(match.group(1))
-                return int(value * 1_000_000)
-        
-        # If kHz is mentioned elsewhere
-        if 'khz' in text.lower() or 'kHz' in text:
-            match = re.search(patterns[-1], text.replace(',', ''))
-            if match:
-                value = float(match.group(1))
-                return int(value * 1_000)
-        
+        logger.debug('No frequency patterns matched')
         return None
 
-    def evaluate_request(self, user_input: str) -> Dict:
-        """
-        Evaluate if a user request requires SDR operations
-        Args:
-            user_input: The user's request text
-        Returns:
-            Dict containing the evaluation results and metadata
-        """
-        # Add trace tags for this evaluation
-        config = {
-            "metadata": {
-                "agent_type": "chat_coordinator",
-                "operation": "request_evaluation",
-                "input_type": "user_request",
-                "tags": self.trace_tags
-            }
-        }
-        
+    def evaluate_request(self, message: str) -> Dict:
+        """Evaluate if a user request requires SDR operations"""
         try:
-            # Run the evaluation
-            result = self.executor.invoke(
-                {
-                    "input": user_input,
-                    "chat_history": []  # Initialize empty chat history
-                },
-                config=config
-            )
+            # Get frequency from message
+            freq = self._parse_frequency(message)
             
-            # Parse the structured output
-            analysis = self._parse_llm_response(result["output"])
-            
-            # Only attempt tuning if we have a specific frequency and tuning is required
-            if analysis.get("requires_tuning") == "true":
-                # Try to get frequency from the input first
-                freq = self._parse_frequency(user_input)
-                if not freq:
-                    # If not found in input, try the frequency_mentioned field
-                    freq = self._parse_frequency(analysis.get("frequency_mentioned", ""))
+            if freq:
+                # Convert to MHz for display
+                freq_mhz = freq / 1_000_000
                 
-                if freq:
-                    print(f"🎯 Parsed frequency: {freq} Hz")
-                    tuning_result = self.tuning_tool.run({"frequency": freq})
-                    analysis["tuning_result"] = tuning_result
-                else:
-                    # If no specific frequency found, mark as needing more info
-                    analysis["requires_tuning"] = "false"
-                    analysis["needs_info"] = "Need a specific frequency to tune to"
+                # Do the actual tuning
+                self.tuning_tool.run({"frequency": freq})
+                
+                # Just return a simple success message
+                return {
+                    "requires_tuning": "true", 
+                    "frequency_mentioned": str(freq),
+                    "confidence": "high",
+                    "tuning_result": f"I've tuned the radio to {freq_mhz:.3f} MHz for you.",
+                    "success": True
+                }
             
-            return analysis
-            
-        except Exception as e:
-            # Log the error and return a safe response
-            print(f"Error evaluating request: {str(e)}")
+            # Not a tuning request
             return {
-                "requires_tuning": False,
-                "confidence": "low",
-                "reasoning": f"Error processing request: {str(e)}",
+                "requires_tuning": "false",
                 "frequency_mentioned": "none",
-                "needs_info": None
-            }
-    
-    def _parse_llm_response(self, response: str) -> Dict:
-        """
-        Parse the LLM's structured response into a dictionary
-        Args:
-            response: The LLM's formatted response string
-        Returns:
-            Dict containing the parsed values
-        """
-        try:
-            lines = response.strip().split('\n')
-            result = {}
-            
-            for line in lines:
-                if ':' in line:
-                    key, value = line.split(':', 1)
-                    key = key.strip().lower().replace(' ', '_')
-                    value = value.strip().lower()
-                    if value.startswith('[') and value.endswith(']'):
-                        value = value[1:-1]  # Remove brackets
-                    result[key] = value
-            
-            return result
-        except Exception as e:
-            print(f"Error parsing LLM response: {str(e)}")
-            return {
-                "requires_tuning": False,
                 "confidence": "low",
-                "reasoning": f"Error parsing response: {str(e)}",
-                "frequency_mentioned": "none"
+                "tuning_result": "",
+                "success": True
+            }
+                
+        except Exception as e:
+            return {
+                "requires_tuning": "false",
+                "confidence": "low",
+                "tuning_result": str(e),
+                "frequency_mentioned": "none",
+                "success": False
             }
 
 # Example usage
