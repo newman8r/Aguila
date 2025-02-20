@@ -81,3 +81,24 @@ add_source_files(UI_SRCS_LIST
 	iq_tool.ui
 	nb_options.ui
 )
+
+# Create the qtgui library target
+add_library(qtgui STATIC ${SRCS_LIST} ${UI_SRCS_LIST})
+
+# Add Python include directories
+target_include_directories(qtgui
+	PRIVATE
+	${Python3_INCLUDE_DIRS}
+)
+
+# Link required libraries
+target_link_libraries(qtgui
+	PRIVATE
+	Qt::Core
+	Qt::Widgets
+	Qt::WebEngineWidgets
+	Qt::WebChannel
+	Qt::Sql
+	Qt::Network
+	${Python3_LIBRARIES}
+)

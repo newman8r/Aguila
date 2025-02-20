@@ -18,6 +18,7 @@
 #include <QSqlDatabase>
 #include <QThread>
 #include <QDateTime>
+#include <QProcess>
 #include <memory>
 #include <functional>
 
@@ -38,6 +39,8 @@ signals:
 
 private:
     QNetworkAccessManager *networkManager;
+    QProcess *pythonProcess;
+    bool analyzeTuningRequest(const QString &message);
 };
 
 // Worker class for database operations
