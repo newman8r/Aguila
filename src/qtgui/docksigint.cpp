@@ -106,12 +106,45 @@ bool NetworkWorker::analyzeTuningRequest(const QString &message)
         qDebug().noquote() << script;
 
         // Set working directory to Aguila root
-        pythonProcess->setWorkingDirectory(QDir::currentPath());
+        QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
+        QDir aguilaDir(aguilaRoot);
+        QString absoluteAguilaPath = aguilaDir.absolutePath();
+        pythonProcess->setWorkingDirectory(absoluteAguilaPath);
+        
+        // Set up environment
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("PYTHONPATH", absoluteAguilaPath);
+        env.insert("PYTHONUNBUFFERED", "1");  // Ensure Python output is not buffered
+        
+        // Copy over any existing environment variables from .env
+        QFile envFile(absoluteAguilaPath + "/.env");
+        if (envFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            while (!envFile.atEnd()) {
+                QString line = envFile.readLine().trimmed();
+                if (!line.isEmpty() && !line.startsWith('#')) {
+                    QStringList parts = line.split('=');
+                    if (parts.size() == 2) {
+                        QString key = parts[0].trimmed();
+                        QString value = parts[1].trimmed();
+                        // Remove quotes if present
+                        if (value.startsWith('"') && value.endsWith('"')) {
+                            value = value.mid(1, value.length() - 2);
+                        }
+                        env.insert(key, value);
+                        qDebug() << "Setting env var:" << key << "=" << (key.contains("KEY") ? "***" : value);
+                    }
+                }
+            }
+            envFile.close();
+        }
+        
+        pythonProcess->setProcessEnvironment(env);
         
         // Run the script
         pythonProcess->setArguments(QStringList() << scriptFile.fileName());
         qDebug() << "🚀 Running Python script with args:" << pythonProcess->arguments();
         qDebug() << "📂 Working directory:" << pythonProcess->workingDirectory();
+        qDebug() << "📂 PYTHONPATH:" << env.value("PYTHONPATH");
         
         pythonProcess->start();
         
