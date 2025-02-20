@@ -16,6 +16,7 @@ from pathlib import Path
 import re
 from .tuning_tool import GqrxTuningTool
 import logging
+from langchain.callbacks import tracing_v2_enabled
 
 # Find and load the .env file
 def setup_environment():
@@ -191,31 +192,46 @@ class ChatCoordinator:
     def evaluate_request(self, message: str) -> Dict:
         """Evaluate if a user request requires SDR operations"""
         try:
-            # Get frequency from message
+            # Get frequency from message first - fast operation
             freq = self._parse_frequency(message)
             
-            if freq:
-                # Convert to MHz for display
-                freq_mhz = freq / 1_000_000
-                
-                # Do the actual tuning
-                self.tuning_tool.run({"frequency": freq})
-                
-                # Just return a simple success message
+            if not freq:
                 return {
-                    "requires_tuning": "true", 
-                    "frequency_mentioned": str(freq),
-                    "confidence": "high",
-                    "tuning_result": f"I've tuned the radio to {freq_mhz:.3f} MHz for you.",
+                    "requires_tuning": "false",
+                    "frequency_mentioned": "none",
+                    "confidence": "low",
+                    "tuning_result": "No valid frequency found in request",
                     "success": True
                 }
+
+            # Convert to MHz for display
+            freq_mhz = freq / 1_000_000
+
+            # Create a simple prompt for quick analysis
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert radio operator. 
+                Provide a SINGLE SENTENCE explanation about the frequency being tuned to.
+                Focus on the band type (FM, AM, HAM, etc) and common usage of this frequency range.
+                Keep it brief and technical."""),
+                ("human", f"Explain tuning to {freq_mhz} MHz")
+            ])
+
+            # Stream the response with a short timeout
+            with tracing_v2_enabled():
+                chain = prompt | self.llm
+                explanation = chain.invoke({"input": message}, config={"timeout": 3.0})
+                
+            # Do the actual tuning
+            tuning_result = self.tuning_tool.run({"frequency": freq})
             
-            # Not a tuning request
+            # Combine tuning confirmation with explanation
+            tuning_msg = f"Tuned to {freq_mhz:.3f} MHz. {explanation}"
+            
             return {
-                "requires_tuning": "false",
-                "frequency_mentioned": "none",
-                "confidence": "low",
-                "tuning_result": "",
+                "requires_tuning": "true",
+                "frequency_mentioned": str(freq),
+                "confidence": "high",
+                "tuning_result": tuning_msg,
                 "success": True
             }
                 
@@ -223,8 +239,8 @@ class ChatCoordinator:
             return {
                 "requires_tuning": "false",
                 "confidence": "low",
-                "tuning_result": str(e),
-                "frequency_mentioned": "none",
+                "tuning_result": f"Error: {str(e)}",
+                "frequency_mentioned": "none", 
                 "success": False
             }
 
