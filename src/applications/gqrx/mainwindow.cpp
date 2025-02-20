@@ -359,6 +359,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
     connect(uiDockAudio, SIGNAL(audioMuted(bool)), remote, SLOT(setAudioMuted(bool)));
     connect(remote, SIGNAL(waterfallRangeChanged(float,float)), ui->plotter, SLOT(setWaterfallRange(float,float)));
     connect(remote, SIGNAL(waterfallRangeChanged(float,float)), uiDockFft, SLOT(setWaterfallRange(float,float)));
+    connect(remote, SIGNAL(takeScreenshot()), this, SLOT(captureScreenshot()));
 
     rds_timer = new QTimer(this);
     connect(rds_timer, SIGNAL(timeout()), this, SLOT(rdsTimeout()));
@@ -2565,4 +2566,44 @@ void MainWindow::toggleMarkers()
 {
     enableMarkers(!d_show_markers);
     uiDockFft->setMarkersEnabled(d_show_markers);
+}
+
+// Add new method implementation
+void MainWindow::captureScreenshot()
+{
+    // Create screenshots directory in the config folder
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/gqrx/screenshots";
+    
+    // Create directory if it doesn't exist
+    QDir dir(configDir);
+    if (!dir.exists()) {
+        qDebug() << "Creating screenshots directory:" << configDir;
+        if (!dir.mkpath(".")) {
+            qDebug() << "Failed to create screenshots directory";
+            ui->statusBar->showMessage(tr("Failed to create screenshots directory"), 5000);
+            return;
+        }
+    }
+    
+    // Generate filename with timestamp and frequency
+    QString timestamp = QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss");
+    QString filepath = QString("%1/waterfall_%2_%3MHz.png")
+            .arg(configDir)
+            .arg(timestamp)
+            .arg(ui->freqCtrl->getFrequency() / 1e6, 0, 'f', 3);
+            
+    qDebug() << "Screenshot will be saved to:" << filepath;
+
+    // Capture the plotter widget
+    QPixmap screenshot = ui->plotter->grab();
+    
+    // Save the screenshot
+    if (!screenshot.save(filepath, "PNG")) {
+        qDebug() << "Failed to save screenshot";
+        ui->statusBar->showMessage(tr("Failed to save screenshot"), 5000);
+        return;
+    }
+    
+    qDebug() << "Screenshot saved successfully";
+    ui->statusBar->showMessage(tr("Screenshot saved: %1").arg(filepath), 5000);
 }

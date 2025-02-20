@@ -122,6 +122,7 @@ signals:
     void newRDSmode(bool value);
     void newAudioMuted(bool muted);
     void waterfallRangeChanged(float min, float max);
+    void takeScreenshot();
 
 private slots:
     void acceptConnection();

@@ -258,6 +258,11 @@ void RemoteControl::startRead()
             answer = cmd_dump_state();
         else if (cmd == "\\get_powerstat")
             answer = QString("1\n");
+        else if (cmd == "SCREENSHOT")
+        {
+            emit takeScreenshot();
+            answer = QString("RPRT 0\n");
+        }
         else if (cmd == "q" || cmd == "Q")
         {
             // FIXME: for now we assume 'close' command
