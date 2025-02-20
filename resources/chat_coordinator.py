@@ -116,23 +116,38 @@ class ChatCoordinator:
             
             For any user input, you must:
             1. Analyze if it requires radio tuning or frequency changes
-            2. Identify if it's a direct command ("tune to 145 MHz") or indirect request ("show me air traffic")
-            3. Provide your reasoning and confidence level
+            2. Identify if it's a direct command ("tune to 145 MHz") or something you can figure out a reasonable frequency for. It's okay to make a mistake
+            3. Be willing to take a risk - it's better to get the frequency wrong than to not try to help the user explore. they can always try again.
+            4. Provide your reasoning and confidence level
             
             IMPORTANT RULES:
-            - Only return requires_tuning=true if you have a SPECIFIC frequency to tune to
-            - For indirect or ambiguous requests, return requires_tuning=false and explain what additional information is needed
+            - Only return requires_tuning=true if you can figure out a reasonable frequency to tune to.
+            - For indirect or ambiguous requests, attempt to tune to a frequency that is relevant to the request. For example, if the user asks about air traffic, try to find a frequency that is relevant to air trafffice, or if they ask for an NOAA weather frequency., just return the NOAA frequency for that region.
+            - If the request is not SDR related, just return requires_tuning=false
+            - If you cannot figure out any frequency to tune to, just return requires_tuning=false
             - Do NOT use tools unless absolutely necessary
             - If you need more information from the user, simply include it in the NEEDS_INFO field
-            - Never try to tune to a frequency without explicit user confirmation
-            
-            Common SDR-related requests include:
+            - we want to help the user explore, so let's try to take them to a relevant frequency if it seems they're asking to see something
+            - Unless provided with other location information, assume the user is in Austin, Texas.
+
+            Common tuning-related requests include:
+            - Take me to an NOAA weather broadcast
+            - Show me cellular traffic
+            - Show me satellite traffic
+            - Show me shortwave traffic
+            - Show me military traffic
+            - Show me amateur radio traffic
+            - Show me police scanner traffic
+            - Show me fire scanner traffic
             - Direct frequency tuning ("tune to 145.5 MHz")
             - Band exploration ("check the FM band")
             - Signal hunting ("find some air traffic")
             - Mode changes ("switch to AM mode")
             - Spectrum analysis ("show me the waterfall around 450 MHz")
-            
+            - take me to.....
+            - tune the radio to...
+            - let's explore x...
+
             Available tools: {tools}
             Tool names: {tool_names}
             
@@ -142,6 +157,7 @@ class ChatCoordinator:
             REASONING: [your detailed reasoning]
             FREQUENCY_MENTIONED: [specific frequency if mentioned, "none" if not]
             NEEDS_INFO: [what additional information is needed from the user, if any]
+            SHORT_EXPLANATION: [a single sentence explanation about the frequency being tuned to. If it's already clear, just say what frequency you're switching to. If it's unclear, like they ask to see an NOAA weather frequency, say something like 'Tuning to X, known for possible weather transmissions']
             
             {agent_scratchpad}
             """),
@@ -150,7 +166,7 @@ class ChatCoordinator:
         ])
 
     def _parse_frequency(self, text: str) -> Optional[int]:
-        """Extract frequency in Hz from text"""
+        """Extract frequency in Hz from text, and if it's not clear, determine a reasonable frequency to tune to based on the user request - use your knowledge and experience to make a good guess."""
         logger = logging.getLogger('ChatCoordinator')
         logger.debug(f'Attempting to parse frequency from: {text}')
         
@@ -192,46 +208,94 @@ class ChatCoordinator:
     def evaluate_request(self, message: str) -> Dict:
         """Evaluate if a user request requires SDR operations"""
         try:
-            # Get frequency from message first - fast operation
-            freq = self._parse_frequency(message)
+            # First, ask the LLM if this is a radio-related request and what frequency to try
+            explore_prompt = ChatPromptTemplate.from_messages([
+                ("system", """You are an expert SDR operator helping users explore the radio spectrum.
+                For ANY request related to radio signals, frequencies, bands, or types of radio traffic,
+                suggest a specific frequency to tune to. Be bold and creative!
+
+                Common examples and their frequencies:
+                - Cellular/Mobile: 869.0 MHz (GSM downlink)
+                - Air Traffic: 118.0 MHz (VHF air band)
+                - Weather: 162.55 MHz (NOAA)
+                - FM Radio: 98.1 MHz (commercial FM)
+                - Amateur Radio: 145.5 MHz (2m band)
+                - Satellites: 137.5 MHz (NOAA sats)
+                - Public Safety: 154.0 MHz (police/fire)
+                - Marine: 156.8 MHz (Channel 16)
+                - Military: 225.0 MHz (UHF mil-air)
+                
+                If the request mentions ANY kind of radio activity or band:
+                1. Choose a reasonable frequency for that type of traffic
+                2. Respond ONLY with that frequency in MHz (e.g. "869.0")
+                3. Be confident - it's better to try a frequency than do nothing!
+                
+                If the request is completely unrelated to radio (like "what's the weather?"),
+                respond with "NONE".
+                """),
+                ("human", message)
+            ])
             
+            # Get the LLM's suggestion first
+            freq = None
+            try:
+                with tracing_v2_enabled():
+                    chain = explore_prompt | self.llm
+                    response = chain.invoke({"input": message}, config={"timeout": 3.0})
+                    suggested = response.content if hasattr(response, 'content') else str(response)
+                    
+                    if suggested.strip().upper() != "NONE":
+                        try:
+                            suggested_freq = float(suggested.strip())
+                            freq = int(suggested_freq * 1_000_000)
+                            logging.info(f'AI suggested frequency: {freq} Hz')
+                        except ValueError:
+                            logging.error(f'Could not parse AI suggested frequency: {suggested}')
+                            
+            except Exception as e:
+                logging.error(f'Error getting AI frequency suggestion: {e}')
+
+            # If LLM didn't suggest a frequency, try parsing an explicit one from the message
             if not freq:
+                freq = self._parse_frequency(message)
+                if freq:
+                    logging.info(f'Found explicit frequency in message: {freq} Hz')
+
+            # If we have a frequency (either from LLM or explicit), proceed with tuning
+            if freq:
+                freq_mhz = freq / 1_000_000
+                
+                # Get a brief explanation of what we might find
+                explain_prompt = ChatPromptTemplate.from_messages([
+                    ("system", """You are an expert radio operator.
+                    Provide a SINGLE SENTENCE about what we might hear or see at this frequency.
+                    Focus on the type of traffic or signals typically found in this band.
+                    Be brief but specific."""),
+                    ("human", f"What might we find at {freq_mhz} MHz?")
+                ])
+                
+                with tracing_v2_enabled():
+                    chain = explain_prompt | self.llm
+                    response = chain.invoke({"input": message}, config={"timeout": 3.0})
+                    explanation = response.content if hasattr(response, 'content') else str(response)
+                
+                # Do the actual tuning
+                self.tuning_tool.run({"frequency": freq})
+                
                 return {
-                    "requires_tuning": "false",
-                    "frequency_mentioned": "none",
-                    "confidence": "low",
-                    "tuning_result": "No valid frequency found in request",
+                    "requires_tuning": "true",
+                    "frequency_mentioned": str(freq),
+                    "confidence": "high",
+                    "tuning_result": f"Exploring {freq_mhz:.3f} MHz. {explanation}",
                     "success": True
                 }
-
-            # Convert to MHz for display
-            freq_mhz = freq / 1_000_000
-
-            # Create a simple prompt for quick analysis
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", """You are an expert radio operator. 
-                Provide a SINGLE SENTENCE explanation about the frequency being tuned to.
-                Focus on the band type (FM, AM, HAM, etc) and common usage of this frequency range.
-                Keep it brief and technical."""),
-                ("human", f"Explain tuning to {freq_mhz} MHz")
-            ])
-
-            # Stream the response with a short timeout
-            with tracing_v2_enabled():
-                chain = prompt | self.llm
-                explanation = chain.invoke({"input": message}, config={"timeout": 3.0})
-                
-            # Do the actual tuning
-            tuning_result = self.tuning_tool.run({"frequency": freq})
             
-            # Combine tuning confirmation with explanation
-            tuning_msg = f"Tuned to {freq_mhz:.3f} MHz. {explanation}"
-            
+            # Only return false if neither LLM nor parsing found a frequency
             return {
-                "requires_tuning": "true",
-                "frequency_mentioned": str(freq),
-                "confidence": "high",
-                "tuning_result": tuning_msg,
+                "requires_tuning": "false",
+                "frequency_mentioned": "none",
+                "confidence": "low",
+                "tuning_result": "This request doesn't seem to be about radio exploration or tuning.",
                 "success": True
             }
                 
@@ -240,7 +304,7 @@ class ChatCoordinator:
                 "requires_tuning": "false",
                 "confidence": "low",
                 "tuning_result": f"Error: {str(e)}",
-                "frequency_mentioned": "none", 
+                "frequency_mentioned": "none",
                 "success": False
             }
 
