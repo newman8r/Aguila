@@ -29,6 +29,13 @@ MAX_RANGE = 48  # Maximum range (HackRF dynamic range)
 ABSOLUTE_MIN_DB = -110  # Absolute minimum reference
 ABSOLUTE_MAX_DB = -10   # Absolute maximum reference
 
+# Signal strength thresholds
+STRONG_SIGNAL = -30  # dBFS threshold for strong signals (e.g. FM broadcast)
+WEAK_SIGNAL = -60   # dBFS threshold for weak signals
+# Range adjustments based on signal strength
+STRONG_SIGNAL_RANGE = 40  # Use smaller range for strong signals
+WEAK_SIGNAL_RANGE = 60    # Use wider range for weak signals
+
 class TelnetConnection:
     """Wrapper for telnet connection to Aguila's remote control interface"""
     
@@ -113,14 +120,20 @@ def calculate_optimal_settings(current_settings: dict) -> dict:
         reference += HIGH_GAIN_ADJUSTMENT
         logger.debug(f"Adjusting reference by {HIGH_GAIN_ADJUSTMENT} dB for high gain")
     
-    # Estimate noise floor and SNR
-    noise_floor = peak_signal - 30  # Conservative estimate
-    snr = peak_signal - noise_floor
-    logger.debug(f"Estimated SNR: {snr} dB")
-    
-    # Calculate range
-    range_db = min(MAX_RANGE, max(MIN_RANGE, snr + SNR_BUFFER))
-    logger.debug(f"Calculated range: {range_db} dB")
+    # Determine range based on signal strength
+    if peak_signal > STRONG_SIGNAL:
+        # Strong signal (e.g. FM broadcast) - use smaller range higher up
+        range_db = STRONG_SIGNAL_RANGE
+        logger.debug(f"Strong signal detected ({peak_signal} dBFS), using {range_db} dB range")
+    elif peak_signal < WEAK_SIGNAL:
+        # Weak signal - use wider range lower down
+        range_db = WEAK_SIGNAL_RANGE
+        logger.debug(f"Weak signal detected ({peak_signal} dBFS), using {range_db} dB range")
+    else:
+        # Medium signal - interpolate range
+        t = (peak_signal - WEAK_SIGNAL) / (STRONG_SIGNAL - WEAK_SIGNAL)
+        range_db = WEAK_SIGNAL_RANGE + t * (STRONG_SIGNAL_RANGE - WEAK_SIGNAL_RANGE)
+        logger.debug(f"Medium signal detected ({peak_signal} dBFS), using {range_db} dB range")
     
     # Calculate min_db from reference and range
     min_db = reference - range_db
