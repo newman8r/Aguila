@@ -103,6 +103,7 @@ public slots:
     void rdsPI(QString program_id);
     void setRdsStation(QString name);
     void setRdsRadiotext(QString text);
+    void setWaterfallRange(float min, float max);
 
 signals:
     void newFrequency(qint64 freq);
@@ -120,6 +121,8 @@ signals:
     void dspChanged(bool value);
     void newRDSmode(bool value);
     void newAudioMuted(bool muted);
+    void waterfallRangeChanged(float min, float max);
+    void takeScreenshot();
 
 private slots:
     void acceptConnection();
@@ -153,6 +156,8 @@ private:
     bool        hamlib_compatible;
     gain_list_t gains;             /*!< Possible and current gain settings */
     bool        is_audio_muted;
+    float       waterfall_min_db;
+    float       waterfall_max_db;
 
     void        setNewRemoteFreq(qint64 freq);
     int         modeStrToInt(QString mode_str);

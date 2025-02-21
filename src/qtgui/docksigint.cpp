@@ -22,33 +22,203 @@
 #include <QSplitter>
 #include <QPushButton>
 #include <QHBoxLayout>
+#include <QTemporaryFile>
+#include <QTextStream>
 #include "../applications/gqrx/mainwindow.h"
 #include "docksigint.h"
 #include "ui_docksigint.h"
 #include "waterfall_display.h"
 #include "plotter.h"
+#include <QNetworkAccessManager>
+#include <QNetworkRequest>
+#include <QNetworkReply>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
 
 // NetworkWorker implementation
 NetworkWorker::NetworkWorker(QObject *parent) : QObject(parent)
 {
     networkManager = new QNetworkAccessManager(this);
+    pythonProcess = new QProcess(this);
+    pythonProcess->setProgram("python3");
 }
 
 NetworkWorker::~NetworkWorker()
 {
     delete networkManager;
+    if (pythonProcess->state() == QProcess::Running) {
+        pythonProcess->terminate();
+        pythonProcess->waitForFinished();
+    }
+}
+
+bool NetworkWorker::analyzeTuningRequest(const QString &message)
+{
+    qDebug() << "\n=== 🔍 Analyzing Tuning Request ===";
+    qDebug() << "Message:" << message;
+
+    // Create a temporary Python script
+    QTemporaryFile scriptFile;
+    if (scriptFile.open()) {
+        qDebug() << "✅ Created temporary script at:" << scriptFile.fileName();
+        
+        QTextStream stream(&scriptFile);
+        QString escapedMessage = message;
+        escapedMessage.replace("\"", "\\\"");
+        QString script = QString(
+            "import sys\n"
+            "import os\n"
+            "import json\n"
+            "import logging\n\n"
+            "# Configure logging\n"
+            "logging.basicConfig(level=logging.DEBUG)\n"
+            "logger = logging.getLogger('TuningAnalyzer')\n\n"
+            "# Add current directory to path\n"
+            "current_dir = os.path.dirname(os.path.abspath(__file__))\n"
+            "logger.debug(f'Current directory: {current_dir}')\n"
+            "sys.path.append('.')\n"
+            "logger.debug(f'Python path: {sys.path}')\n\n"
+            "try:\n"
+            "    logger.debug('Importing chat_coordinator...')\n"
+            "    from resources.chat_coordinator import ChatCoordinator\n"
+            "    logger.debug('Successfully imported ChatCoordinator')\n\n"
+            "    logger.debug('Creating coordinator instance...')\n"
+            "    coordinator = ChatCoordinator()\n"
+            "    logger.debug('Successfully created coordinator')\n\n"
+            "    message = %1\n"
+            "    logger.debug(f'Analyzing message: {message}')\n"
+            "    result = coordinator.evaluate_request(message)\n"
+            "    logger.debug(f'Analysis result: {result}')\n\n"
+            "    # Print result as JSON for parsing\n"
+            "    print(json.dumps(result))\n"
+            "except Exception as e:\n"
+            "    logger.error(f'Error during analysis: {str(e)}')\n"
+            "    import traceback\n"
+            "    traceback.print_exc()\n"
+            "    sys.exit(1)\n"
+        ).arg(QString("\"%1\"").arg(escapedMessage));
+
+        stream << script;
+        scriptFile.close();
+        
+        qDebug() << "📜 Generated Python script:";
+        qDebug().noquote() << script;
+
+        // Set working directory to Aguila root
+        QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
+        QDir aguilaDir(aguilaRoot);
+        QString absoluteAguilaPath = aguilaDir.absolutePath();
+        pythonProcess->setWorkingDirectory(absoluteAguilaPath);
+        
+        // Set up environment
+        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+        env.insert("PYTHONPATH", absoluteAguilaPath);
+        env.insert("PYTHONUNBUFFERED", "1");  // Ensure Python output is not buffered
+        
+        // Copy over any existing environment variables from .env
+        QFile envFile(absoluteAguilaPath + "/.env");
+        if (envFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            while (!envFile.atEnd()) {
+                QString line = envFile.readLine().trimmed();
+                if (!line.isEmpty() && !line.startsWith('#')) {
+                    QStringList parts = line.split('=');
+                    if (parts.size() == 2) {
+                        QString key = parts[0].trimmed();
+                        QString value = parts[1].trimmed();
+                        // Remove quotes if present
+                        if (value.startsWith('"') && value.endsWith('"')) {
+                            value = value.mid(1, value.length() - 2);
+                        }
+                        env.insert(key, value);
+                        qDebug() << "Setting env var:" << key << "=" << (key.contains("KEY") ? "***" : value);
+                    }
+                }
+            }
+            envFile.close();
+        }
+        
+        pythonProcess->setProcessEnvironment(env);
+        
+        // Run the script
+        pythonProcess->setArguments(QStringList() << scriptFile.fileName());
+        qDebug() << "🚀 Running Python script with args:" << pythonProcess->arguments();
+        qDebug() << "📂 Working directory:" << pythonProcess->workingDirectory();
+        qDebug() << "📂 PYTHONPATH:" << env.value("PYTHONPATH");
+        
+        pythonProcess->start();
+        
+        if (pythonProcess->waitForStarted()) {
+            qDebug() << "✅ Python process started";
+            
+            if (pythonProcess->waitForFinished()) {
+                QString stdout = QString::fromUtf8(pythonProcess->readAllStandardOutput());
+                QString stderr = QString::fromUtf8(pythonProcess->readAllStandardError());
+                
+                qDebug() << "\n=== Python Process Output ===";
+                qDebug() << "Exit code:" << pythonProcess->exitCode();
+                qDebug() << "Standard output:" << stdout;
+                if (!stderr.isEmpty()) {
+                    qDebug() << "Standard error:" << stderr;
+                }
+                
+                // Try to parse the output as JSON
+                QJsonDocument doc = QJsonDocument::fromJson(stdout.toUtf8());
+                if (!doc.isNull()) {
+                    QJsonObject result = doc.object();
+                    bool requiresTuning = result["requires_tuning"].toString() == "true";
+                    qDebug() << "Analysis result:";
+                    qDebug() << "- Requires tuning:" << requiresTuning;
+                    qDebug() << "- Confidence:" << result["confidence"].toString();
+                    qDebug() << "- Frequency:" << result["frequency_mentioned"].toString();
+                    
+                    if (requiresTuning) {
+                        qDebug() << "🎯 Tuning request detected!";
+                        return true;
+                    }
+                } else {
+                    qDebug() << "❌ Failed to parse Python output as JSON";
+                }
+            } else {
+                qDebug() << "❌ Python process failed to finish";
+                qDebug() << "Error:" << pythonProcess->errorString();
+            }
+        } else {
+            qDebug() << "❌ Failed to start Python process";
+            qDebug() << "Error:" << pythonProcess->errorString();
+        }
+    } else {
+        qDebug() << "❌ Failed to create temporary script file";
+    }
+    
+    qDebug() << "=== Analysis Complete ===\n";
+    return false;
 }
 
 void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, const QJsonArray &messages)
 {
-    // Create the request body
+    qDebug() << "\n=== 📨 Processing Message ===";
+    
+    // Get the latest message from the array
+    QString latestMessage = messages.last().toObject()["content"].toString();
+    qDebug() << "Message content:" << latestMessage;
+    
+    // First, analyze with coordinator
+    qDebug() << "🔍 Analyzing for tuning request...";
+    if (analyzeTuningRequest(latestMessage)) {
+        qDebug() << "✅ Tuning request confirmed - bypassing Claude";
+        emit messageReceived("✅ Tuning request processed - adjusting radio frequency...");
+        return;
+    }
+    qDebug() << "ℹ️ Not a tuning request - proceeding with Claude";
+
+    // If not a tuning request, proceed with normal Claude request
     QJsonObject requestBody{
         {"model", model},
         {"messages", messages},
         {"max_tokens", 4096}
     };
 
-    // Prepare the network request
     QNetworkRequest request(QUrl("https://api.anthropic.com/v1/messages"));
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("x-api-key", apiKey.toUtf8());
@@ -58,7 +228,6 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
     qDebug() << "  - Model:" << model;
     qDebug() << "  - Messages:" << messages.size();
 
-    // Send the request and connect to its finished signal
     QNetworkReply *reply = networkManager->post(request, QJsonDocument(requestBody).toJson());
     
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -86,6 +255,8 @@ void NetworkWorker::sendMessage(const QString &apiKey, const QString &model, con
         }
         reply->deleteLater();
     });
+    
+    qDebug() << "=== Message Processing Complete ===\n";
 }
 
 // DatabaseWorker implementation
@@ -460,16 +631,44 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     ui->chatDisplay->setLayout(layout);
     qDebug() << "✅ Web view initialized";
 
-    // Initialize network worker
-    qDebug() << "🌍 Starting network worker...";
-    networkWorker = new NetworkWorker();
-    networkWorker->moveToThread(&networkThread);
-    connect(&networkThread, &QThread::finished, networkWorker, &QObject::deleteLater);
+    // Load environment variables before creating NetworkWorker
+    QString configDir = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    QString envPath = QDir(configDir).filePath(".env");
+    if (QFile::exists(envPath)) {
+        QFile envFile(envPath);
+        if (envFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            while (!envFile.atEnd()) {
+                QString line = envFile.readLine().trimmed();
+                if (!line.isEmpty() && !line.startsWith('#')) {
+                    QStringList parts = line.split('=');
+                    if (parts.size() == 2) {
+                        QString key = parts[0].trimmed();
+                        QString value = parts[1].trimmed();
+                        // Remove quotes if present
+                        if (value.startsWith('"') && value.endsWith('"')) {
+                            value = value.mid(1, value.length() - 2);
+                        }
+                        qputenv(key.toUtf8(), value.toUtf8());
+                    }
+                }
+            }
+            envFile.close();
+            qDebug() << "✅ Environment variables loaded from" << envPath;
+        }
+    }
+
+    // Create worker thread and move NetworkWorker to it
+    QThread *networkThread = new QThread(this);
+    NetworkWorker *networkWorker = new NetworkWorker();
+    networkWorker->moveToThread(networkThread);
+
+    // Set up network worker connections
+    connect(networkThread, &QThread::finished, networkWorker, &QObject::deleteLater);
     connect(this, &DockSigint::sendMessageToWorker, networkWorker, &NetworkWorker::sendMessage);
     connect(networkWorker, &NetworkWorker::messageReceived, this, &DockSigint::onWorkerMessageReceived);
     connect(networkWorker, &NetworkWorker::errorOccurred, this, &DockSigint::onWorkerErrorOccurred);
-    networkThread.start();
-    qDebug() << "✅ Network worker started";
+    networkThread->start();
+    qDebug() << "✅ Network worker started in separate thread";
 
     // Initialize database worker
     qDebug() << "💾 Starting database worker...";
@@ -685,7 +884,7 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
             // Load chat history
             emit loadHistoryFromDb(currentChatId);
             if (messageHistory.isEmpty()) {
-                appendMessage("🦅 Welcome to the Aguila SIGINT platform. Claude has the helm.", false);
+                appendMessage("👋 Welcome to the Aguila SIGINT platform. Claude has the helm.", false);
             }
         }
     });
@@ -758,8 +957,8 @@ void DockSigint::loadEnvironmentVariables()
     // Try multiple possible locations for .env
     QStringList possiblePaths = {
         QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) + "/gqrx/.env",  // ~/.config/gqrx/.env
-        QDir::currentPath() + "/.env",
-        QCoreApplication::applicationDirPath() + "/.env",
+        QDir::currentPath() + ".env",
+        QCoreApplication::applicationDirPath() + ".env",
         QCoreApplication::applicationDirPath() + "/../.env",
         QCoreApplication::applicationDirPath() + "/../../.env"
     };
@@ -824,12 +1023,15 @@ void DockSigint::readSettings(QSettings *settings)
 
 void DockSigint::onSendClicked()
 {
+    qDebug() << "\n=== 🚀 Send Button Clicked ===";
     QString message = ui->chatInput->text().trimmed();
     if (!message.isEmpty()) {
+        qDebug() << "Message:" << message;
         appendMessage(message);
         sendToClaude(message);
         ui->chatInput->clear();
     }
+    qDebug() << "=== Send Complete ===\n";
 }
 
 void DockSigint::onReturnPressed()
@@ -837,206 +1039,30 @@ void DockSigint::onReturnPressed()
     onSendClicked();
 }
 
-QString DockSigint::getBaseHtml()
-{
-    return QString(R"HTML(<!DOCTYPE html>
-<html>
-<head>
-<style>
-html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    background: #1e1e1e;
-    color: #d4d4d4;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-
-#chat-container {
-    padding: 16px;
-    height: 100%;
-    overflow-y: auto;
-    scroll-behavior: smooth;
-    display: flex;
-    flex-direction: column;
-}
-
-#messages {
-    flex-grow: 1;
-    min-height: min-content;
-}
-
-.message {
-    margin: 16px 0;
-    opacity: 0;
-    transform: translateY(20px);
-    animation: messageIn 0.3s ease-out forwards;
-}
-
-@keyframes messageIn {
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.message-content {
-    padding: 16px;
-    border-radius: 8px;
-    line-height: 1.5;
-    position: relative;
-    overflow: hidden;
-}
-
-.user-message .message-content {
-    background: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.assistant-message .message-content {
-    background: #1e1e1e;
-}
-
-.sender {
-    font-weight: 500;
-    margin-bottom: 8px;
-}
-
-.user-message .sender {
-    color: #4ec9b0;
-}
-
-.assistant-message .sender {
-    color: #569cd6;
-}
-
-.copy-button {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    padding: 4px 8px;
-    background: #3d3d3d;
-    border: none;
-    border-radius: 4px;
-    color: #569cd6;
-    cursor: pointer;
-    opacity: 0.8;
-    transition: all 0.2s ease;
-    font-size: 14px;
-}
-
-.message-content:hover .copy-button {
-    opacity: 1;
-}
-
-.copy-button:hover {
-    background: #4d4d4d;
-}
-</style>
-
-<script>
-function copyMessage(element) {
-    const text = element.parentElement.querySelector('.text').innerText;
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(() => {
-            const button = element;
-            button.innerHTML = '✓';
-            button.style.background = '#4ec9b0';
-            button.style.color = '#ffffff';
-            setTimeout(() => {
-                button.innerHTML = '📋';
-                button.style.background = '#3d3d3d';
-                button.style.color = '#569cd6';
-            }, 1000);
-        }).catch(err => {
-            console.error('Failed to copy:', err);
-        });
-    }
-}
-
-function scrollToBottom() {
-    const container = document.getElementById('chat-container');
-    if (container) container.scrollTop = container.scrollHeight;
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    scrollToBottom();
-});
-</script>
-</head>
-<body>
-<div id="chat-container">
-    <div id="messages"></div>
-</div>
-</body>
-</html>)HTML");
-}
-
-void DockSigint::initializeWebView()
-{
-    webView->setContextMenuPolicy(Qt::NoContextMenu);
-    webView->setStyleSheet("QWebEngineView { background: #1e1e1e; }");
-}
-
-void DockSigint::updateChatView()
-{
-    webView->setHtml(chatHtml);
-}
-
-void DockSigint::appendMessage(const QString &message, bool isUser)
-{
-    qDebug() << "\n=== Appending Message ===";
-    qDebug() << "Is User:" << isUser;
-    qDebug() << "Content:" << message.left(50) + "...";
-
-    Message msg;
-    msg.id = -1;
-    msg.role = isUser ? "user" : "assistant";
-    msg.content = message;
-    
-    // Add to history
-    messageHistory.append(msg);
-    
-    // Save to database asynchronously
-    qDebug() << "Sending save message request to worker thread";
-    emit saveMessageToDb(currentChatId, msg.role, msg.content);
-    
-    // Update view asynchronously
-    qDebug() << "Updating view";
-    appendMessageToView(msg.content, isUser);
-    qDebug() << "=================================\n";
-}
-
-void DockSigint::appendMessageToView(const QString &message, bool isUser)
-{
-    QString messageHtml = QString(
-        "<div class=\"message %1\">"
-        "<div class=\"message-content\">"
-        "<button class=\"copy-button\" onclick=\"copyMessage(this)\">📋</button>"
-        "<div class=\"sender\">%2</div>"
-        "<div class=\"text\">%3</div>"
-        "</div>"
-        "</div>"
-    ).arg(isUser ? "user-message" : "assistant-message",
-          isUser ? "User" : "Assistant",
-          message.toHtmlEscaped());
-
-    // Run JavaScript asynchronously
-    webView->page()->runJavaScript(QString("appendMessage(`%1`);").arg(messageHtml));
-}
-
 void DockSigint::sendToClaude(const QString &message, std::function<void(const QString&)> callback)
 {
-    qDebug() << "Preparing to send message to Claude...";
+    qDebug() << "\n=== 📤 Sending Message to Claude ===";
+    qDebug() << "Message:" << message;
+    
+    // Call the three-parameter version with empty image data
+    sendToClaude(message, QByteArray(), callback);
+    
+    qDebug() << "=== Send Initiated ===\n";
+}
+
+void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData, std::function<void(const QString&)> callback)
+{
+    qDebug() << "\n=== 📤 Sending Message to Claude (with potential image) ===";
+    qDebug() << "Message:" << message;
+    qDebug() << "Has image data:" << !imageData.isEmpty();
     
     if (anthropicApiKey.isEmpty()) {
-        qDebug() << "Error: API key is empty";
+        qDebug() << "❌ Error: API key is empty";
         appendMessage("Error: API key not found. Please check your .env file.", false);
         return;
     }
 
-    // Prepare the messages array with proper format
+    // Prepare the messages array with history
     QJsonArray messages;
     for (const auto &msg : messageHistory) {
         messages.append(QJsonObject{
@@ -1046,75 +1072,38 @@ void DockSigint::sendToClaude(const QString &message, std::function<void(const Q
     }
 
     // Add the current message
-    messages.append(QJsonObject{
-        {"role", "user"},
-        {"content", message}
-    });
-
-    qDebug() << "Message history size:" << messages.size();
-    
-    // Connect a one-time handler for the response if callback provided
-    if (callback) {
-        QMetaObject::Connection *connection = new QMetaObject::Connection;
-        *connection = connect(networkWorker, &NetworkWorker::messageReceived,
-                            this, [this, callback, connection](const QString &response) {
-            // Disconnect after receiving the response
-            QObject::disconnect(*connection);
-            delete connection;
-            
-            // Call the callback with the response
-            callback(response);
-        });
-    }
-    
-    emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
-}
-
-void DockSigint::sendToClaude(const QString &message, const QByteArray &imageData, std::function<void(const QString&)> callback)
-{
-    qDebug() << "Preparing to send message with image to Claude...";
-    
-    if (anthropicApiKey.isEmpty()) {
-        qDebug() << "Error: API key is empty";
-        appendMessage("Error: API key not found. Please check your .env file.", false);
-        return;
-    }
-
-    // Convert image to base64
-    QString base64Image = QString::fromLatin1(imageData.toBase64());
-    
-    // Prepare the messages array with proper format
-    QJsonArray messages;
-    for (const auto &msg : messageHistory) {
+    if (imageData.isEmpty()) {
+        // Text-only message
         messages.append(QJsonObject{
-            {"role", msg.role == "user" ? "user" : "assistant"},
-            {"content", msg.content}
+            {"role", "user"},
+            {"content", message}
+        });
+    } else {
+        // Message with image
+        QString base64Image = QString::fromLatin1(imageData.toBase64());
+        
+        QJsonObject source;
+        source.insert("type", "base64");
+        source.insert("media_type", "image/png");
+        source.insert("data", base64Image);
+
+        QJsonObject imageContent;
+        imageContent.insert("type", "image");
+        imageContent.insert("source", source);
+
+        QJsonObject textContent;
+        textContent.insert("type", "text");
+        textContent.insert("text", message);
+
+        QJsonArray contentArray;
+        contentArray.append(imageContent);
+        contentArray.append(textContent);
+
+        messages.append(QJsonObject{
+            {"role", "user"},
+            {"content", contentArray}
         });
     }
-
-    // Create message with image
-    QJsonObject source;
-    source.insert("type", "base64");
-    source.insert("media_type", "image/png");
-    source.insert("data", base64Image);
-
-    QJsonObject imageContent;
-    imageContent.insert("type", "image");
-    imageContent.insert("source", source);
-
-    QJsonObject textContent;
-    textContent.insert("type", "text");
-    textContent.insert("text", message);
-
-    QJsonArray contentArray;
-    contentArray.append(imageContent);
-    contentArray.append(textContent);
-
-    // Add the current message with image
-    messages.append(QJsonObject{
-        {"role", "user"},
-        {"content", contentArray}
-    });
 
     qDebug() << "Message history size:" << messages.size();
     
@@ -1132,7 +1121,10 @@ void DockSigint::sendToClaude(const QString &message, const QByteArray &imageDat
         });
     }
     
+    qDebug() << "🚀 Emitting sendMessageToWorker signal";
     emit sendMessageToWorker(anthropicApiKey, currentModel, messages);
+    
+    qDebug() << "=== Send Complete ===\n";
 }
 
 void DockSigint::onWorkerMessageReceived(const QString &message)
@@ -1440,12 +1432,20 @@ void DockSigint::setupTabSystem()
     toolbarLayout->setSpacing(8);
 
     // Add screenshot button
-    QPushButton *screenshotBtn = new QPushButton("📸 Screenshot");
+    QPushButton *screenshotBtn = new QPushButton("AI Signal Analysis");
     screenshotBtn->setObjectName("screenshotButton");
     toolbarLayout->addWidget(screenshotBtn);
     
+    // Add AI FFT Optimize button
+    QPushButton *fftOptimizeBtn = new QPushButton("AI FFT Optimize");
+    fftOptimizeBtn->setObjectName("fftOptimizeButton");
+    toolbarLayout->addWidget(fftOptimizeBtn);
+    
     // Connect screenshot button to capture function
     connect(screenshotBtn, &QPushButton::clicked, this, &DockSigint::captureWaterfallScreenshot);
+
+    // Connect FFT Optimize button
+    connect(fftOptimizeBtn, &QPushButton::clicked, this, &DockSigint::runWaterfallOptimizer);
 
     // Add spacer to push everything to the left
     toolbarLayout->addStretch();
@@ -1783,4 +1783,236 @@ void DockSigint::switchToLastActiveChat()
         qDebug() << "  ⚠️ Chat" << currentChatId << "not found in chat list!";
     }
     qDebug() << "=================================\n";
+}
+
+QString DockSigint::getBaseHtml()
+{
+    return QString(R"HTML(<!DOCTYPE html>
+<html>
+<head>
+<style>
+html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+#chat-container {
+    padding: 16px;
+    height: 100%;
+    overflow-y: auto;
+    scroll-behavior: smooth;
+    display: flex;
+    flex-direction: column;
+}
+
+#messages {
+    flex-grow: 1;
+    min-height: min-content;
+}
+
+.message {
+    margin: 16px 0;
+    opacity: 0;
+    transform: translateY(20px);
+    animation: messageIn 0.3s ease-out forwards;
+}
+
+@keyframes messageIn {
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.message-content {
+    padding: 16px;
+    border-radius: 8px;
+    line-height: 1.5;
+    position: relative;
+    overflow: hidden;
+}
+
+.user-message .message-content {
+    background: #2d2d2d;
+    border: 1px solid #3d3d3d;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+.assistant-message .message-content {
+    background: #1e1e1e;
+}
+
+.sender {
+    font-weight: 500;
+    margin-bottom: 8px;
+}
+
+.user-message .sender {
+    color: #4ec9b0;
+}
+
+.assistant-message .sender {
+    color: #569cd6;
+}
+
+.copy-button {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 4px 8px;
+    background: #3d3d3d;
+    border: none;
+    border-radius: 4px;
+    color: #569cd6;
+    cursor: pointer;
+    opacity: 0.8;
+    transition: all 0.2s ease;
+    font-size: 14px;
+}
+
+.message-content:hover .copy-button {
+    opacity: 1;
+}
+
+.copy-button:hover {
+    background-color: rgba(61, 61, 61, 0.8);
+}
+</style>
+
+<script>
+function copyMessage(element) {
+    const text = element.parentElement.querySelector('.text').innerText;
+    if (navigator.clipboard) {
+        navigator.clipboard.writeText(text).then(() => {
+            const button = element;
+            button.innerHTML = '✓';
+            button.style.background = '#4ec9b0';
+            button.style.color = '#ffffff';
+            setTimeout(() => {
+                button.innerHTML = '📋';
+                button.style.background = '#3d3d3d';
+                button.style.color = '#569cd6';
+            }, 1000);
+        }).catch(err => {
+            console.error('Failed to copy:', err);
+        });
+    }
+}
+
+function scrollToBottom() {
+    const container = document.getElementById('chat-container');
+    if (container) container.scrollTop = container.scrollHeight;
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    scrollToBottom();
+});
+</script>
+</head>
+<body>
+<div id="chat-container">
+    <div id="messages"></div>
+</div>
+</body>
+</html>)HTML");
+}
+
+void DockSigint::initializeWebView()
+{
+    webView->setContextMenuPolicy(Qt::NoContextMenu);
+    webView->setStyleSheet("QWebEngineView { background: #1e1e1e; }");
+}
+
+void DockSigint::updateChatView()
+{
+    webView->setHtml(chatHtml);
+}
+
+void DockSigint::appendMessage(const QString &message, bool isUser)
+{
+    qDebug() << "\n=== Appending Message ===";
+    qDebug() << "Is User:" << isUser;
+    qDebug() << "Content:" << message.left(50) + "...";
+
+    Message msg;
+    msg.id = -1;
+    msg.role = isUser ? "user" : "assistant";
+    msg.content = message;
+    
+    // Add to history
+    messageHistory.append(msg);
+    
+    // Save to database asynchronously
+    qDebug() << "Sending save message request to worker thread";
+    emit saveMessageToDb(currentChatId, msg.role, msg.content);
+    
+    // Update view asynchronously
+    qDebug() << "Updating view";
+    appendMessageToView(msg.content, isUser);
+    qDebug() << "=================================\n";
+}
+
+void DockSigint::appendMessageToView(const QString &message, bool isUser)
+{
+    QString messageHtml = QString(
+        "<div class=\"message %1\">"
+        "<div class=\"message-content\">"
+        "<button class=\"copy-button\" onclick=\"copyMessage(this)\">📋</button>"
+        "<div class=\"sender\">%2</div>"
+        "<div class=\"text\">%3</div>"
+        "</div>"
+        "</div>"
+    ).arg(isUser ? "user-message" : "assistant-message",
+          isUser ? "User" : "Assistant",
+          message.toHtmlEscaped());
+
+    // Run JavaScript asynchronously
+    webView->page()->runJavaScript(QString("appendMessage(`%1`);").arg(messageHtml));
+}
+
+void DockSigint::runWaterfallOptimizer()
+{
+    qDebug() << "\n=== Running Waterfall Display Optimizer ===";
+    
+    // Initial message to user
+    appendMessage("🎯 Starting waterfall display optimization... The display will auto-adjust several times over the next 10-15 seconds.", false);
+    
+    // Get absolute path to the script
+    QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
+    QString scriptPath = aguilaRoot + "resources/waterfall_display_optimizer.py";
+    
+    // Create and configure process
+    QProcess *process = new QProcess(this);
+    process->setWorkingDirectory(aguilaRoot);
+    process->setProgram("python3");
+    process->setArguments(QStringList() << scriptPath);
+    
+    // Start the process
+    process->start();
+    
+    // Connect output handlers
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
+        QString output = QString::fromUtf8(process->readAllStandardOutput());
+        qDebug() << "Optimizer output:" << output;  // Just log to debug
+    });
+    
+    connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
+        QString error = QString::fromUtf8(process->readAllStandardError());
+        qDebug() << "Optimizer error:" << error;  // Just log to debug
+    });
+    
+    // Connect finished handler
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
+        if (exitCode == 0) {
+            appendMessage("✅ Waterfall display optimization complete! The optimal dB range has been applied.", false);
+        } else {
+            appendMessage("❌ Waterfall optimization failed. Please try again.", false);
+        }
+        process->deleteLater();
+    });
 } 

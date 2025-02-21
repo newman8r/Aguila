@@ -18,6 +18,7 @@
 #include <QSqlDatabase>
 #include <QThread>
 #include <QDateTime>
+#include <QProcess>
 #include <memory>
 #include <functional>
 
@@ -38,6 +39,8 @@ signals:
 
 private:
     QNetworkAccessManager *networkManager;
+    QProcess *pythonProcess;
+    bool analyzeTuningRequest(const QString &message);
 };
 
 // Worker class for database operations
@@ -94,7 +97,6 @@ signals:
 
 public slots:
     void onReceiverDestroyed() { rx_ptr = nullptr; }
-    void onDspStateChanged(bool running);
 
 private slots:
     void onSendClicked();
@@ -104,6 +106,10 @@ private slots:
     void onNewChatClicked();
     void onChatSelected(int index);
     void onChatsLoaded(const QVector<QPair<int, QString>> &chats);
+    void onDspStateChanged(bool running);
+    void onTabChanged(const QString &tabName);
+    void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
+    void runWaterfallOptimizer();  // New slot for FFT optimization
     
     // Spectrum capture slots
     void onCaptureStarted(const SpectrumCapture::CaptureRange& range);
@@ -111,8 +117,6 @@ private slots:
     void onCaptureError(const std::string& error);
     void onCaptureProgress(int percent);
     void testSpectrumCapture();  // Test function
-    void onTabChanged(const QString &tabName);  // Add this new slot
-    void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
 
 private:
     struct Message {

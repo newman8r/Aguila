@@ -123,7 +123,7 @@ endif()
 
 # 3rd Party Dependency Stuff
 option(FORCE_QT6 "Force Qt6 to be used" OFF)
-option(FORCE_QT5 "Force Qt5 to be used" OFF)
+option(FORCE_QT5 "Force Qt5 to be used" ON)  # Force Qt5 since that's what we're using
 
 if(FORCE_QT6)
     find_package(Qt6 REQUIRED COMPONENTS Core Network Widgets Svg SvgWidgets WebEngineWidgets Sql)
@@ -255,6 +255,7 @@ set(CMAKE_INCLUDE_CURRENT_DIR ON)
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
     ${GNURADIO_OSMOSDR_INCLUDE_DIRS}
+    ${Python3_INCLUDE_DIRS}  # Add Python includes
 )
 
 link_directories(

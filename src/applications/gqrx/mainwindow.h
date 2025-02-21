@@ -71,6 +71,7 @@ public slots:
     void setMarkerA(qint64 freq);
     void setMarkerB(qint64 freq);
     void enableMarkers(bool enable);
+    void captureScreenshot();  // New slot for screenshots
 
 signals:
     void dspStateChanged(bool running);  // Add signal declaration here

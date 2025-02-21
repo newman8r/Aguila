@@ -96,14 +96,11 @@ from langchain.agents import create_react_agent
 from langchain_anthropic import ChatAnthropic
 from typing import List, Dict
 
-class SDRAgent:
+class BaseAgent:
+    """Base agent class with common LangSmith configuration"""
     def __init__(self, api_key: str, tools: List[Tool], project_name: str = "aguila-project"):
         # Ensure environment is set up before any LangChain imports
         setup_environment(api_key, project_name)
-        
-        # Now import LangChain components
-        from langchain.agents import create_react_agent
-        from langchain_anthropic import ChatAnthropic
         
         self.project_name = project_name
         self.llm = ChatAnthropic(
@@ -112,6 +109,15 @@ class SDRAgent:
             temperature=0.1
         )
         self.tools = tools
+        
+        # Verify LangSmith configuration
+        self.langsmith_client = get_langsmith_client(project_name)
+        print(f"✅ LangSmith configured for project: {self.langsmith_client.project_name}")
+
+class SDRAgent(BaseAgent):
+    """Specific agent for SDR operations"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.agent = create_react_agent(
             llm=self.llm,
             tools=self.tools,
@@ -122,10 +128,6 @@ class SDRAgent:
             tools=self.tools,
             verbose=True
         )
-        
-        # Verify LangSmith configuration
-        self.langsmith_client = get_langsmith_client(project_name)
-        print(f"✅ LangSmith configured for project: {self.langsmith_client.project_name}")
     
     def get_prompt(self) -> str:
         return """You are an expert SDR operator.
@@ -139,103 +141,11 @@ class SDRAgent:
         
         Human: {input}
         Assistant: Let me help you with that."""
-```
 
-2. **Tool Definitions**
-```python
-# In new file: agent/sdr_tools.py
-from langchain.tools import tool
-from .ipc_client import AguilaIPCClient
-
-client = AguilaIPCClient()
-
-@tool
-def tune_frequency(freq_mhz: float) -> str:
-    """Tune the SDR receiver to a specific frequency in MHz."""
-    response = client.send_command(f"TUNE:{freq_mhz}")
-    return f"Tuned to {freq_mhz} MHz. Response: {response}"
-
-@tool
-def set_demod_mode(mode: str) -> str:
-    """Set the demodulation mode (AM/FM/SSB/CW)."""
-    response = client.send_command(f"MODE:{mode}")
-    return f"Set mode to {mode}. Response: {response}"
-
-@tool
-def capture_spectrum(span_khz: int) -> str:
-    """Capture spectrum data with specified span in kHz."""
-    response = client.send_command(f"CAPTURE:{span_khz}")
-    return f"Captured {span_khz}kHz spectrum. Response: {response}"
-```
-
-### Phase 3: LangSmith Integration
-
-1. **Environment Setup and Project Configuration**
-```python
-# In new file: agent/config.py
-import os
-from typing import Optional
-from langsmith import Client
-
-def setup_environment(langsmith_api_key: str, project_name: str = "aguila-project"):
-    """Set up environment variables before any LangChain imports."""
-    os.environ["LANGCHAIN_TRACING_V2"] = "true"
-    os.environ["LANGCHAIN_API_KEY"] = langsmith_api_key
-    os.environ["LANGCHAIN_PROJECT"] = project_name
-    
-    # Verify environment setup
-    if os.environ.get("LANGCHAIN_PROJECT") != project_name:
-        raise EnvironmentError(
-            f"Failed to set LANGCHAIN_PROJECT. Expected {project_name}, "
-            f"got {os.environ.get('LANGCHAIN_PROJECT')}"
-        )
-
-def get_langsmith_client(project_name: str = "aguila-project") -> Client:
-    """Get LangSmith client with explicit project configuration."""
-    client = Client()
-    client.project_name = project_name  # Explicit project setting
-    return client
-
-def create_agent_config(
-    agent_type: str,
-    operation: str,
-    frequency: Optional[float] = None,
-    mode: Optional[str] = None
-) -> dict:
-    """Create agent configuration with project name and metadata."""
-    return {
-        "configurable": {
-            "project_name": os.environ["LANGCHAIN_PROJECT"]
-        },
-        "metadata": {
-            "agent": agent_type,
-            "operation": operation,
-            "frequency": frequency,
-            "mode": mode,
-            "timestamp": datetime.now().isoformat()
-        }
-    }
-```
-
-2. **Agent Integration with Project Configuration**
-```python
-# Update in agent/sdr_agents.py
-class SDRAgent:
-    def __init__(self, api_key: str, tools: List[Tool], project_name: str = "aguila-project"):
-        # Ensure environment is set up before any LangChain imports
-        setup_environment(api_key, project_name)
-        
-        # Now import LangChain components
-        from langchain.agents import create_react_agent
-        from langchain_anthropic import ChatAnthropic
-        
-        self.project_name = project_name
-        self.llm = ChatAnthropic(
-            model="claude-3-sonnet-20240229",
-            anthropic_api_key=api_key,
-            temperature=0.1
-        )
-        self.tools = tools
+class ChatCoordinator(BaseAgent):
+    """Coordinator agent that determines when to use SDR functionality"""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.agent = create_react_agent(
             llm=self.llm,
             tools=self.tools,
@@ -246,51 +156,101 @@ class SDRAgent:
             tools=self.tools,
             verbose=True
         )
-        
-        # Verify LangSmith configuration
-        self.langsmith_client = get_langsmith_client(project_name)
-        print(f"✅ LangSmith configured for project: {self.langsmith_client.project_name}")
     
-    def execute(self, input_text: str, **kwargs) -> Dict:
-        """Execute agent with proper project configuration."""
+    def get_prompt(self) -> str:
+        return """You are an expert at understanding user requests related to SDR operations.
+        Your primary role is to determine if a user's request requires tuning the radio or other SDR operations.
+        
+        For any user input, you should:
+        1. Analyze if it requires radio tuning or frequency changes
+        2. Identify if it's a direct command ("tune to 145 MHz") or indirect request ("show me air traffic")
+        3. Provide your reasoning and confidence level
+        
+        Output your response in the following format:
+        REQUIRES_TUNING: [true/false]
+        CONFIDENCE: [high/medium/low]
+        REASONING: [your detailed reasoning]
+        FREQUENCY_MENTIONED: [specific frequency if mentioned, "none" if not]
+        
+        Human: {input}
+        Assistant: Let me analyze that request."""
+
+    def evaluate_request(self, user_input: str) -> Dict:
+        """Evaluate if a user request requires SDR operations"""
         config = create_agent_config(
-            agent_type=kwargs.get("agent_type", "sdr_operator"),
-            operation=kwargs.get("operation", "general"),
-            frequency=kwargs.get("frequency"),
-            mode=kwargs.get("mode")
+            agent_type="chat_coordinator",
+            operation="request_evaluation",
+            metadata={
+                "input_type": "user_request",
+                "evaluation_type": "tuning_need"
+            }
         )
         
         return self.executor.invoke(
-            {"input": input_text},
+            {"input": user_input},
             config=config
         )
 ```
 
-3. **Testing Project Configuration**
+2. **Updated Tool Definitions**
 ```python
-# In new file: tests/test_langsmith_config.py
-def test_project_configuration():
-    # Test environment setup
-    setup_environment("test_key", "test_project")
-    assert os.environ["LANGCHAIN_PROJECT"] == "test_project"
-    
-    # Test client configuration
-    client = get_langsmith_client("test_project")
-    assert client.project_name == "test_project"
-    
-    # Test agent config generation
-    config = create_agent_config("test_agent", "test_op")
-    assert config["configurable"]["project_name"] == "test_project"
-    assert "agent" in config["metadata"]
+# In new file: agent/coordinator_tools.py
+from langchain.tools import tool
+from typing import Dict
 
-def test_agent_project_integration():
-    agent = SDRAgent(api_key="test_key", tools=[], project_name="test_project")
-    assert agent.langsmith_client.project_name == "test_project"
+@tool
+def analyze_tuning_request(request: str) -> Dict:
+    """Analyze if a request requires radio tuning and extract relevant details."""
+    # This is a structured analysis tool that helps the coordinator
+    # make decisions about user requests
+    return {
+        "requires_tuning": True/False,
+        "confidence": "high/medium/low",
+        "frequency_mentioned": "145MHz" or None,
+        "request_type": "direct/indirect/unrelated"
+    }
+```
+
+### Phase 4: Multi-Agent Coordination
+
+1. **Agent Communication Flow**
+```mermaid
+graph TD
+    A[User Input] --> B[Chat Coordinator]
+    B -- "Needs Tuning" --> C[SDR Agent]
+    B -- "Other Request" --> D[Direct Response]
+    C --> E[Execute SDR Operation]
+    C --> F[Return Result]
+```
+
+2. **Coordination Implementation**
+```python
+class AguilaSystem:
+    def __init__(self, api_key: str, project_name: str = "aguila-project"):
+        self.coordinator = ChatCoordinator(
+            api_key=api_key,
+            tools=[analyze_tuning_request],
+            project_name=project_name
+        )
+        self.sdr_agent = SDRAgent(
+            api_key=api_key,
+            tools=[tune_frequency, set_demod_mode, capture_spectrum],
+            project_name=project_name
+        )
     
-    result = agent.execute("Test command")
-    # Verify trace appears in correct project via API
-    traces = agent.langsmith_client.list_runs(project_name="test_project")
-    assert len(traces) > 0
+    def handle_request(self, user_input: str) -> str:
+        # First, let the coordinator evaluate the request
+        evaluation = self.coordinator.evaluate_request(user_input)
+        
+        if evaluation["requires_tuning"]:
+            # If tuning is needed, pass to SDR agent
+            return self.sdr_agent.execute(
+                user_input,
+                metadata={"coordinator_confidence": evaluation["confidence"]}
+            )
+        else:
+            # Handle non-tuning requests
+            return f"This request doesn't require radio tuning. Reason: {evaluation['reasoning']}"
 ```
 
 ## Project Configuration Notes

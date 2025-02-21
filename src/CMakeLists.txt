@@ -5,6 +5,7 @@ add_subdirectory(dsp)
 add_subdirectory(interfaces)
 add_subdirectory(qtgui)
 add_subdirectory(receivers)
+add_subdirectory(llm)
 
 # Add src directory to include path
 include_directories(${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/qtgui)
