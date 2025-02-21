@@ -1436,6 +1436,11 @@ void DockSigint::setupTabSystem()
     screenshotBtn->setObjectName("screenshotButton");
     toolbarLayout->addWidget(screenshotBtn);
     
+    // Add AI FFT Optimize button
+    QPushButton *fftOptimizeBtn = new QPushButton("AI FFT Optimize");
+    fftOptimizeBtn->setObjectName("fftOptimizeButton");
+    toolbarLayout->addWidget(fftOptimizeBtn);
+    
     // Connect screenshot button to capture function
     connect(screenshotBtn, &QPushButton::clicked, this, &DockSigint::captureWaterfallScreenshot);
 
