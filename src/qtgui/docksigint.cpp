@@ -1432,7 +1432,7 @@ void DockSigint::setupTabSystem()
     toolbarLayout->setSpacing(8);
 
     // Add screenshot button
-    QPushButton *screenshotBtn = new QPushButton("📸 Screenshot");
+    QPushButton *screenshotBtn = new QPushButton("AI Signal Analysis");
     screenshotBtn->setObjectName("screenshotButton");
     toolbarLayout->addWidget(screenshotBtn);
     
