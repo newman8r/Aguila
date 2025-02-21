@@ -1,10 +1,114 @@
+Aguila Signal Analysis Platform
+============================
+
+[![CI](https://github.com/gqrx-sdr/gqrx/workflows/CI/badge.svg)](https://github.com/gqrx-sdr/gqrx/actions?query=workflow%3ACI+branch%3Amaster)
+[![Build](https://github.com/gqrx-sdr/gqrx/workflows/Build/badge.svg)](https://github.com/gqrx-sdr/gqrx/actions?query=workflow%3ABuild+branch%3Amaster)
+
+Aguila is an advanced signals analysis platform built on top of Gqrx, combining traditional SDR capabilities with AI-powered signal analysis. It extends the core Gqrx functionality with intelligent waterfall optimization, automated signal classification, and an interactive AI assistant for signal analysis.
+
+## Key Features
+
+### AI-Powered Signal Analysis
+- Intelligent waterfall display optimization using Claude AI
+- Automated signal classification and modulation recognition
+- Interactive AI assistant for signal analysis and SDR operation
+- Real-time FFT optimization for optimal signal visibility
+
+### Core SDR Capabilities
+- Support for AM, FM, SSB, and raw I/Q modes
+- Advanced FFT display and waterfall visualization
+- Hardware support for RTL-SDR, HackRF, Airspy, BladeRF, and more
+- Network control interface for external applications
+
+## Requirements
+
+### Core Dependencies
+- GNU Radio 3.8, 3.9, or 3.10 with standard components
+- Qt 5 or Qt 6 with Core, GUI, Network, Widgets, and Svg
+- gr-osmosdr and device-specific drivers
+- CMake >= 3.2.0
+
+### Python Dependencies
+```bash
+pip install python-dotenv requests anthropic numpy scipy matplotlib
+```
+
+### Environment Setup
+1. Create a `.env` file in the Aguila root directory:
+```
+ANTHROPIC_API_KEY=your_api_key_here
+AI_MODEL=claude-3-opus-20240229
+DEBUG_MODE=false
+```
+
+2. Install device-specific drivers:
+- RTL-SDR: `rtl-sdr` package
+- HackRF: `hackrf` package
+- Airspy: `airspy` package
+- Other devices as needed
+
+## Installation
+
+### From Source
+```bash
+git clone https://github.com/yourusername/aguila.git
+cd aguila
+mkdir build
+cd build
+cmake ..
+make
+```
+
+### Device Management
+
+#### Switching Between SDR Devices
+To prevent configuration conflicts when switching devices:
+
+1. Close Aguila completely
+2. Run the device switch script:
+```bash
+# For HackRF:
+./resources/sdr_switch.sh hackrf
+
+# For RTL-SDR:
+./resources/sdr_switch.sh rtlsdr
+```
+3. Launch Aguila
+
+## Usage
+
+### Basic Operation
+1. Start Aguila
+2. Configure your SDR device in the I/O Control panel
+3. Click the power button to start DSP
+4. Use the frequency display to tune to your signal of interest
+
+### AI Features
+- **AI Signal Analysis**: Click the "AI Signal Analysis" button or press Ctrl+P to capture and analyze the current signal
+- **FFT Optimization**: Use "AI FFT Optimize" to automatically adjust waterfall display settings
+- **Signal Assistant**: Use the chat interface to ask questions about signals or request analysis
+
+### Keyboard Shortcuts
+- Ctrl+P: Capture and analyze current signal
+- Ctrl+G: Test spectrum capture
+- F11: Toggle fullscreen
+- Other standard Gqrx shortcuts remain unchanged
+
+## Credits and License
+
+Aguila is built on top of Gqrx, which is designed and written by Alexandru Csete OZ9AEC and licensed under the GNU General Public License. The AI features and additional functionality are developed by the Aguila team.
+
+For a complete list of contributors and detailed license information, see the original Gqrx credits below.
+
+[Original Gqrx credits and license information follows...]
+
 Gqrx
 ====
 
 [![CI](https://github.com/gqrx-sdr/gqrx/workflows/CI/badge.svg)](https://github.com/gqrx-sdr/gqrx/actions?query=workflow%3ACI+branch%3Amaster)
 [![Build](https://github.com/gqrx-sdr/gqrx/workflows/Build/badge.svg)](https://github.com/gqrx-sdr/gqrx/actions?query=workflow%3ABuild+branch%3Amaster)
 
-Gqrx is an open source software defined radio (SDR) receiver implemented using
+Aguila is a signals analysis platform build on top of Gqrx: open source software defined radio (SDR) receiver implemented using
 [GNU Radio](https://gnuradio.org) and the [Qt GUI toolkit](https://www.qt.io/).
 Currently it works on Linux and Mac with hardware supported by gr-osmosdr,
 including Funcube Dongle, RTL-SDR, Airspy, HackRF, BladeRF, RFSpace, USRP and
