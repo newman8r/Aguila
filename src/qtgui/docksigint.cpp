@@ -1444,6 +1444,9 @@ void DockSigint::setupTabSystem()
     // Connect screenshot button to capture function
     connect(screenshotBtn, &QPushButton::clicked, this, &DockSigint::captureWaterfallScreenshot);
 
+    // Connect FFT Optimize button
+    connect(fftOptimizeBtn, &QPushButton::clicked, this, &DockSigint::runWaterfallOptimizer);
+
     // Add spacer to push everything to the left
     toolbarLayout->addStretch();
     
@@ -1969,4 +1972,46 @@ void DockSigint::appendMessageToView(const QString &message, bool isUser)
 
     // Run JavaScript asynchronously
     webView->page()->runJavaScript(QString("appendMessage(`%1`);").arg(messageHtml));
+}
+
+void DockSigint::runWaterfallOptimizer()
+{
+    qDebug() << "\n=== Running Waterfall Display Optimizer ===";
+    
+    // Get absolute path to the script
+    QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
+    QString scriptPath = aguilaRoot + "resources/waterfall_display_optimizer.py";
+    
+    // Create and configure process
+    QProcess *process = new QProcess(this);
+    process->setWorkingDirectory(aguilaRoot);
+    process->setProgram("python3");
+    process->setArguments(QStringList() << scriptPath);
+    
+    // Start the process
+    process->start();
+    
+    // Connect output handlers
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
+        QString output = QString::fromUtf8(process->readAllStandardOutput());
+        qDebug() << "Optimizer output:" << output;
+        appendMessage("🎯 " + output, false);
+    });
+    
+    connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
+        QString error = QString::fromUtf8(process->readAllStandardError());
+        qDebug() << "Optimizer error:" << error;
+        appendMessage("❌ Error: " + error, false);
+    });
+    
+    // Connect finished handler
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
+        if (exitCode == 0) {
+            appendMessage("✅ Waterfall display optimization complete", false);
+        } else {
+            appendMessage("❌ Optimizer failed with exit code: " + QString::number(exitCode), false);
+        }
+        process->deleteLater();
+    });
 } 
