@@ -1978,6 +1978,9 @@ void DockSigint::runWaterfallOptimizer()
 {
     qDebug() << "\n=== Running Waterfall Display Optimizer ===";
     
+    // Initial message to user
+    appendMessage("🎯 Starting waterfall display optimization... The display will auto-adjust several times over the next 10-15 seconds.", false);
+    
     // Get absolute path to the script
     QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
     QString scriptPath = aguilaRoot + "resources/waterfall_display_optimizer.py";
@@ -1994,23 +1997,21 @@ void DockSigint::runWaterfallOptimizer()
     // Connect output handlers
     connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
         QString output = QString::fromUtf8(process->readAllStandardOutput());
-        qDebug() << "Optimizer output:" << output;
-        appendMessage("🎯 " + output, false);
+        qDebug() << "Optimizer output:" << output;  // Just log to debug
     });
     
     connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
         QString error = QString::fromUtf8(process->readAllStandardError());
-        qDebug() << "Optimizer error:" << error;
-        appendMessage("❌ Error: " + error, false);
+        qDebug() << "Optimizer error:" << error;  // Just log to debug
     });
     
     // Connect finished handler
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             this, [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
         if (exitCode == 0) {
-            appendMessage("✅ Waterfall display optimization complete", false);
+            appendMessage("✅ Waterfall display optimization complete! The optimal dB range has been applied.", false);
         } else {
-            appendMessage("❌ Optimizer failed with exit code: " + QString::number(exitCode), false);
+            appendMessage("❌ Waterfall optimization failed. Please try again.", false);
         }
         process->deleteLater();
     });

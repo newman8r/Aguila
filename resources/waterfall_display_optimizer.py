@@ -66,24 +66,26 @@ RETRY_DELAY = 1.0
 # Get model from .env
 AI_MODEL = os.getenv('AI_MODEL', 'claude-3-opus-20240229')
 
-CLAUDE_PROMPT = """You are an expert at analyzing SDR waterfall displays. I am showing you a waterfall display screenshot that contains 7 distinct horizontal slices of equal height, numbered from 1 to 7 starting from the top. Each slice represents a different dB range, with each subsequent slice stepping down by 7 dB from a starting point of -70 dB.
+CLAUDE_PROMPT = """You are an expert at analyzing SDR waterfall displays. I am showing you a waterfall display screenshot that contains 7 distinct horizontal slices of equal height, numbered from 7 to 1 starting from the top. Each slice represents a different dB range, with each subsequent slice having a lower (more negative) dB range.
 
-The slices are arranged as follows:
-Slice 1 (top): -70 dB to -40 dB
-Slice 2: -77 dB to -47 dB
-Slice 3: -84 dB to -54 dB
-Slice 4: -91 dB to -61 dB
-Slice 5: -98 dB to -68 dB
-Slice 6: -105 dB to -75 dB
-Slice 7 (bottom): -112 dB to -82 dB
+For the FM broadcast band, the optimal slice is almost always Slice 7. In the most common color mode for GQRX, white is the brightest color and is bad. we don't want to choose slices with a lot of white.
+
+The slices are arranged as follows, from least negative (strongest/clearest) at the top to most negative (noisiest) at the bottom:
+Slice 7 (top): -70 dB to -40 dB    (best for very strong signals like FM broadcast)
+Slice 6: -77 dB to -47 dB          (good for stronger signals)
+Slice 5: -84 dB to -54 dB          (good for medium signals)
+Slice 4: -91 dB to -61 dB          (balanced sensitivity)
+Slice 3: -98 dB to -68 dB          (high sensitivity, moderate noise)
+Slice 2: -105 dB to -75 dB         (very high sensitivity, noisy)
+Slice 1 (bottom): -112 dB to -82 dB (highest sensitivity, often appears white/saturated with noise)
+
+Important: The bottom slices (1-2) will often appear very bright or white due to high sensitivity to noise. The top slices (6-7) are best for strong signals like FM broadcast. The middle slices (3-5) often provide the best balance for typical signals.
 
 Please analyze the image and:
-1. Identify which slice shows the clearest signal representation with the best contrast between signal and noise
-2. Note if any slices appear too saturated (too bright) or too dark to be useful
+1. Identify which slice shows the clearest signal representation with the best contrast between signal and noise. Look for clear signal definition without noise saturation.
+2. Note which slices are too noisy (usually appearing white/saturated) or too dark to be useful
 3. Recommend which slice's dB range would be optimal for ongoing signal analysis
 4. Explain your reasoning for the recommendation
-
-Note that the bottom slices may appear very similar due to being below the noise floor, but they are still distinct ranges. Focus on finding the slice that shows the best signal-to-noise ratio while maintaining good visibility of signal details.
 
 Your response should be in this format:
 OPTIMAL_SLICE: [number 1-7]
@@ -270,9 +272,11 @@ class WaterfallOptimizer:
             sys.exit(1)
 
     def calculate_db_range(self, step: int) -> Tuple[float, float]:
-        """Calculate min/max dB values for given step"""
-        base_min = -70  # Starting point
-        min_db = base_min - (step * self.db_step)  # Step down by subtracting
+        """Calculate min/max dB values for given step
+        Step 0 = Slice 1 (top) = most negative dB range
+        Step 6 = Slice 7 (bottom) = least negative dB range"""
+        base_min = -112  # Starting point (most negative)
+        min_db = base_min + (step * self.db_step)  # Step up by adding
         max_db = min_db + self.db_range
         return min_db, max_db
 
