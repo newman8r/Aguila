@@ -91,7 +91,7 @@ MainWindow::MainWindow(const QString& cfgfile, bool edit_conf, QWidget *parent) 
         m_cfg_dir = QString("%1/gqrx").arg(xdg_dir.data());
     }
 
-    setWindowTitle(QString("Gqrx %1").arg(VERSION));
+    setWindowTitle("Aguila Signal Analysis Platform");
 
     // Set fixed widths for labels so they don't move around when set
     QFontMetrics metrics(font);
@@ -569,7 +569,7 @@ bool MainWindow::loadConfig(const QString& cfgfile, bool check_crash,
         }
 
         // Update window title
-        setWindowTitle(QString("Gqrx %1 - %2").arg(VERSION).arg(indev));
+        setWindowTitle(QString("Aguila Signal Analysis Platform - %1").arg(indev));
 
         // Add available antenna connectors to the UI
         std::vector<std::string> antennas = rx->get_antennas();

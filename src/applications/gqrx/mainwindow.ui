@@ -11,7 +11,7 @@
    </rect>
   </property>
   <property name="windowTitle">
-   <string>gqrx</string>
+   <string>Aguila Signal Analysis Platform</string>
   </property>
   <property name="windowIcon">
    <iconset resource="../../../resources/icons.qrc">
