@@ -1441,11 +1441,19 @@ void DockSigint::setupTabSystem()
     fftOptimizeBtn->setObjectName("fftOptimizeButton");
     toolbarLayout->addWidget(fftOptimizeBtn);
     
+    // Add FM Transmit button
+    QPushButton *fmTransmitBtn = new QPushButton("FM Transmit");
+    fmTransmitBtn->setObjectName("fmTransmitButton");
+    toolbarLayout->addWidget(fmTransmitBtn);
+    
     // Connect screenshot button to capture function
     connect(screenshotBtn, &QPushButton::clicked, this, &DockSigint::captureWaterfallScreenshot);
 
     // Connect FFT Optimize button
     connect(fftOptimizeBtn, &QPushButton::clicked, this, &DockSigint::runWaterfallOptimizer);
+    
+    // Connect FM Transmit button
+    connect(fmTransmitBtn, &QPushButton::clicked, this, &DockSigint::startFMTransmission);
 
     // Add spacer to push everything to the left
     toolbarLayout->addStretch();
@@ -2016,3 +2024,12 @@ void DockSigint::runWaterfallOptimizer()
         process->deleteLater();
     });
 } 
+
+// Add this function at the end of the file, before the closing }
+void DockSigint::startFMTransmission()
+{
+    qDebug() << "\n=== Starting FM Transmission ===";
+    
+    // Send message to chat
+    appendMessage("🔊 beginning FM transmission", false);
+}

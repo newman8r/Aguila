@@ -110,6 +110,7 @@ private slots:
     void onTabChanged(const QString &tabName);
     void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
     void runWaterfallOptimizer();  // New slot for FFT optimization
+    void startFMTransmission();   // New slot for FM transmission
     
     // Spectrum capture slots
     void onCaptureStarted(const SpectrumCapture::CaptureRange& range);
