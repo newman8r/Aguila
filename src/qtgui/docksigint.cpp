@@ -2030,6 +2030,127 @@ void DockSigint::startFMTransmission()
 {
     qDebug() << "\n=== Starting FM Transmission ===";
     
-    // Send message to chat
-    appendMessage("🔊 beginning FM transmission", false);
+    // Initial message to user
+    appendMessage("🔊 Beginning FM transmission setup...", false);
+    
+    // Get the current frequency from rx_ptr
+    if (!rx_ptr) {
+        appendMessage("❌ Error: Could not access receiver", false);
+        return;
+    }
+    
+    double centerFreq = rx_ptr->get_rf_freq() / 1e6; // Convert to MHz
+    qDebug() << "Current frequency:" << centerFreq << "MHz";
+    
+    // Get absolute path to the script
+    QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
+    QString scriptPath = aguilaRoot + "resources/real_fm_transmit.py";
+    
+    // Check if script exists
+    if (!QFile::exists(scriptPath)) {
+        QString error = QString("FM transmitter script not found at: %1").arg(scriptPath);
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
+        return;
+    }
+    
+    // Check if audio file exists
+    QString audioPath = aguilaRoot + "resources/audio/bgmusic.wav";
+    if (!QFile::exists(audioPath)) {
+        QString error = QString("Audio file not found at: %1").arg(audioPath);
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
+        return;
+    }
+    
+    appendMessage(QString("🎵 Transmitting at %.3f MHz using HackRF...").arg(centerFreq), false);
+    
+    // Create and configure process with output buffer
+    QProcess *process = new QProcess(this);
+    
+    // Add the output buffer as a dynamic property to the process
+    // This avoids the dangling reference that was causing the segfault
+    process->setProperty("outputBuffer", QString());
+    
+    process->setWorkingDirectory(aguilaRoot);
+    process->setProgram("/usr/bin/python3");
+    process->setArguments(QStringList() << scriptPath << "-f" << QString::number(centerFreq) << "-d");
+    
+    // Start the process
+    qDebug() << "Starting process with:" << process->program() << process->arguments().join(" ");
+    process->start();
+    
+    if (!process->waitForStarted(3000)) {
+        QString error = QString("Failed to start FM transmitter: %1").arg(process->errorString());
+        qDebug() << "❌ Error:" << error;
+        appendMessage("❌ Error: " + error, false);
+        process->deleteLater();
+        return;
+    }
+    
+    // Connect output handlers
+    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
+        QString output = QString::fromUtf8(process->readAllStandardOutput());
+        
+        // Append to stored buffer
+        QString buffer = process->property("outputBuffer").toString();
+        buffer += output;
+        process->setProperty("outputBuffer", buffer);
+        
+        qDebug() << "FM Transmitter output:" << output;
+        
+        // Only send important status messages to the chat
+        QStringList lines = output.split("\n", Qt::SkipEmptyParts);
+        for (const QString &line : lines) {
+            // Only forward meaningful status messages, not debug info
+            if (line.contains("ERROR:", Qt::CaseInsensitive) || 
+                line.contains("Starting FM transmission") ||
+                line.contains("Transmission running") ||
+                line.contains("completed successfully") ||
+                line.contains("interrupted")) {
+                appendMessage(line.trimmed(), false);
+            }
+        }
+    });
+    
+    connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
+        QString error = QString::fromUtf8(process->readAllStandardError());
+        
+        // Append to stored buffer
+        QString buffer = process->property("outputBuffer").toString();
+        buffer += error;
+        process->setProperty("outputBuffer", buffer);
+        
+        qDebug() << "FM Transmitter error:" << error;
+        
+        // Always forward error messages
+        appendMessage("❌ Error: " + error.trimmed(), false);
+    });
+    
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), 
+            this, [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
+        qDebug() << "FM Transmitter process finished with exit code:" << exitCode;
+        
+        // Get the complete output buffer from the process properties
+        QString allOutput = process->property("outputBuffer").toString();
+        
+        if (exitCode == 0) {
+            appendMessage("✅ FM transmission complete", false);
+        } else {
+            qDebug() << "Full process output:\n" << allOutput;
+            
+            // Extract error message if available
+            QString errorMessage = "Unknown error";
+            QStringList lines = allOutput.split("\n");
+            for (const QString &line : lines) {
+                if (line.contains("ERROR:", Qt::CaseInsensitive)) {
+                    errorMessage = line.trimmed();
+                    break;
+                }
+            }
+            
+            appendMessage(QString("❌ FM transmission failed (code %1): %2").arg(exitCode).arg(errorMessage), false);
+        }
+        process->deleteLater();
+    });
 }
