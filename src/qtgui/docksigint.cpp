@@ -1446,6 +1446,11 @@ void DockSigint::setupTabSystem()
     fmTransmitBtn->setObjectName("fmTransmitButton");
     toolbarLayout->addWidget(fmTransmitBtn);
     
+    // Add FSK Transmit button
+    QPushButton *fskTransmitBtn = new QPushButton("FSK Transmit");
+    fskTransmitBtn->setObjectName("fskTransmitButton");
+    toolbarLayout->addWidget(fskTransmitBtn);
+    
     // Connect screenshot button to capture function
     connect(screenshotBtn, &QPushButton::clicked, this, &DockSigint::captureWaterfallScreenshot);
 
@@ -1454,6 +1459,9 @@ void DockSigint::setupTabSystem()
     
     // Connect FM Transmit button
     connect(fmTransmitBtn, &QPushButton::clicked, this, &DockSigint::startFMTransmission);
+    
+    // Connect FSK Transmit button
+    connect(fskTransmitBtn, &QPushButton::clicked, this, &DockSigint::startFSKTransmission);
 
     // Add spacer to push everything to the left
     toolbarLayout->addStretch();
@@ -2153,4 +2161,15 @@ void DockSigint::startFMTransmission()
         }
         process->deleteLater();
     });
+}
+
+// Add this function implementation near the end of the file, near startFMTransmission
+void DockSigint::startFSKTransmission()
+{
+    qDebug() << "\n=== Starting FSK Transmission ===";
+    
+    // Initial message to user
+    appendMessage("🔢 Beginning FSK transmission...", false);
+    
+    qDebug() << "FSK Transmission function called successfully";
 }
