@@ -4,7 +4,7 @@ Aguila Signal Analysis Platform
 [![CI](https://github.com/gqrx-sdr/gqrx/workflows/CI/badge.svg)](https://github.com/gqrx-sdr/gqrx/actions?query=workflow%3ACI+branch%3Amaster)
 [![Build](https://github.com/gqrx-sdr/gqrx/workflows/Build/badge.svg)](https://github.com/gqrx-sdr/gqrx/actions?query=workflow%3ABuild+branch%3Amaster)
 
-Aguila is an advanced signals analysis platform built on top of Gqrx, combining traditional SDR capabilities with AI-powered signal analysis. It extends the core Gqrx functionality with intelligent waterfall optimization, automated signal classification, and an interactive AI assistant for signal analysis.
+Aguila is an advanced signals analysis platform built by Steve Newman (AJ6KS) on top of Gqrx, combining traditional SDR capabilities with AI-powered signal analysis. It extends the core Gqrx functionality with intelligent waterfall optimization, automated signal classification, and an interactive AI assistant for signal analysis.
 
 ## Key Features
 
