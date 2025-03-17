@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-GMSK Transmitter for Aguila
-Uses HackRF to transmit binary data using Gaussian Minimum Shift Keying
-Modified with high-contrast settings for easy decoding in URH/GQRX
+OOK Transmitter for Aguila
+Uses HackRF to transmit binary data using On-Off Keying (OOK)
+This is a simpler modulation type that's easier to see in URH/GQRX
 """
 
 import sys
@@ -10,14 +10,14 @@ import os
 import argparse
 import time
 import numpy as np
-from gnuradio import gr, digital, blocks, filter
+from gnuradio import gr, blocks, analog
 import osmosdr
 
-class GMSKTransmitter(gr.top_block):
+class OOKTransmitter(gr.top_block):
     def __init__(self, freq=433.0e6, message="Hello World", 
-                 baud_rate=300, bt=0.2, gain=20, sample_rate=48000,
+                 baud_rate=500, gain=15, sample_rate=2e6,
                  use_simple_pattern=True, freq_correction_ppm=0):
-        gr.top_block.__init__(self, "GMSK Transmitter")
+        gr.top_block.__init__(self, "OOK Transmitter")
         
         # Parameters
         self.freq = freq
@@ -25,8 +25,6 @@ class GMSKTransmitter(gr.top_block):
         self.sample_rate = sample_rate
         self.message = message
         self.baud_rate = baud_rate
-        # Lower BT value means more bandwidth, more distinctive modulation
-        self.bt = bt  # Bandwidth-time product for GMSK filter
         self.samples_per_symbol = int(sample_rate / baud_rate)
         self.use_simple_pattern = use_simple_pattern
         self.freq_correction_ppm = freq_correction_ppm
@@ -41,62 +39,76 @@ class GMSKTransmitter(gr.top_block):
         else:
             self.corrected_freq = freq
         
-        print(f"Initializing GMSK transmitter with parameters:")
+        print(f"Initializing OOK transmitter with parameters:")
         print(f"  - Frequency: {self.corrected_freq/1e6:.3f} MHz")
-        print(f"  - Baud rate: {baud_rate} bps (SLOWER for easier detection)")
-        print(f"  - BT product: {bt} (LOWER for sharper transitions)")
-        print(f"  - Gain: {gain} (MODERATE to avoid carrier dominance)")
-        print(f"  - Sample rate: {sample_rate/1e3:.1f} kHz")
+        print(f"  - Baud rate: {baud_rate} bps")
+        print(f"  - Gain: {gain}")
+        print(f"  - Sample rate: {sample_rate/1e6:.1f} MHz")
         print(f"  - Samples per symbol: {self.samples_per_symbol}")
         
         # Create data pattern with manual pauses
         if use_simple_pattern:
             # Very simple repeating pattern for easy decoding
-            print(f"  - Using super high-contrast test pattern")
+            print(f"  - Using simple test pattern")
             
-            # Create a much simpler pattern with LONGER sequences
+            # Create a much simpler pattern: just alternating 0xFF and 0x00
             # This creates a very clear 11111111... then 00000000... pattern
-            pattern1 = bytes([0xFF] * 32)  # All 1's repeated (LONGER)
-            pattern2 = bytes([0x00] * 32)  # All 0's repeated (LONGER)
+            pattern1 = bytes([0xFF] * 16)  # All 1's repeated
+            pattern2 = bytes([0x00] * 16)  # All 0's repeated
             
             # Add a large gap with zeros in between patterns
-            pause_bytes = bytes([0x00] * 64)  # Even longer pause (DOUBLE)
+            pause_bytes = bytes([0x00] * 32)  # Pause with 32 zero bytes
             
-            # Construct the full pattern
+            # Construct the full pattern - using a very simple and obvious pattern
             data_pattern = pattern1 + pause_bytes + pattern2 + pause_bytes + pattern1
             
             # Repeat it several times
             self.data = list(data_pattern) * 5
             print(f"  - Pattern length: {len(self.data)} bytes")
-            print(f"  - Pattern: 32x FF + 64x 00 + 32x 00 + 64x 00 + 32x FF (repeated 5 times)")
+            print(f"  - Pattern: 16x FF + 32x 00 + 16x 00 + 32x 00 + 16x FF (repeated 5 times)")
         else:
-            # Convert string to bytes with clearer markers
+            # Convert string to bytes with very clear markers
             print(f"  - Message: {message}")
             # Preamble with very clear pattern
-            preamble = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])
+            preamble = bytes([0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x00])
             message_bytes = bytes(message, 'utf-8')
             # Postamble with clear pattern
             postamble = bytes([0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF])
             
             # Add large zero gaps for easier detection
-            pause_bytes = bytes([0x00] * 48)
+            pause_bytes = bytes([0x00] * 32)
             self.data = list(preamble + pause_bytes + message_bytes + pause_bytes + postamble)
         
-        # Blocks
+        # OOK modulator blocks
+        
         # 1. Vector source for data
         self.source = blocks.vector_source_b(self.data, repeat=True)
         
         # 2. Bytes to bits (unpack)
         self.unpacker = blocks.unpack_k_bits_bb(8)
         
-        # 3. GMSK modulator with increased deviation
-        self.gmsk_mod = digital.gmsk_mod(
-            samples_per_symbol=self.samples_per_symbol,
-            bt=self.bt,
-            verbose=True
+        # 3. Repeat each bit to match our sample rate
+        self.repeat = blocks.repeat(gr.sizeof_char, self.samples_per_symbol)
+        
+        # 4. Convert 0/1 to float values for multiply
+        self.char_to_float = blocks.char_to_float(1, 1.0)
+        
+        # 4.5 NEW: Convert float to complex for the multiply block
+        self.float_to_complex = blocks.float_to_complex(1)
+        
+        # 5. Create a constant carrier wave
+        self.carrier = analog.sig_source_c(
+            sample_rate,       # Sample rate
+            analog.GR_COS_WAVE,# Cosine wave
+            0,                 # 0 Hz (DC)
+            1.0,               # Amplitude
+            0                  # Phase
         )
         
-        # 4. Connect to HackRF - using simple method that works
+        # 6. Multiply carrier by data stream (OOK modulation)
+        self.multiply = blocks.multiply_vcc(1)
+        
+        # 7. Connect to HackRF - using simple method that works
         print("Connecting to HackRF device...")
         try:
             self.hackrf_sink = osmosdr.sink('hackrf=0')
@@ -111,22 +123,34 @@ class GMSKTransmitter(gr.top_block):
         self.hackrf_sink.set_center_freq(self.corrected_freq)
         self.hackrf_sink.set_gain(self.gain)
         
-        # Set moderate IF and BB gain to avoid carrier dominance
-        self.hackrf_sink.set_if_gain(20)    # More moderate IF gain
-        self.hackrf_sink.set_bb_gain(10)    # More moderate baseband gain
+        # Set moderate IF and BB gain
+        self.hackrf_sink.set_if_gain(20)
+        self.hackrf_sink.set_bb_gain(20)
         
-        # Set wider bandwidth for more distinctive signal
-        self.hackrf_sink.set_bandwidth(self.sample_rate * 2)
+        # Set bandwidth for clean signal
+        self.hackrf_sink.set_bandwidth(self.sample_rate/2)
         self.hackrf_sink.set_antenna("TX")
         
-        # Connect the blocks
+        # Connect the blocks for OOK modulation
         print("Connecting GNU Radio blocks...")
-        self.connect(self.source, self.unpacker, self.gmsk_mod, self.hackrf_sink)
-        print("GMSK transmitter initialized successfully")
+        
+        # Connect the data path (unpacker -> repeat -> float conversion -> complex conversion)
+        self.connect(self.source, self.unpacker, self.repeat, self.char_to_float, self.float_to_complex)
+        
+        # Connect the float_to_complex to one input of the multiplier
+        self.connect(self.float_to_complex, (self.multiply, 0))
+        
+        # Connect the carrier to the other input of the multiplier
+        self.connect(self.carrier, (self.multiply, 1))
+        
+        # Connect the multiplier output to the HackRF
+        self.connect(self.multiply, self.hackrf_sink)
+        
+        print("OOK transmitter initialized successfully")
         
     def start_transmission(self):
         try:
-            print(f"Starting GMSK transmission at {self.corrected_freq/1e6:.3f} MHz")
+            print(f"Starting OOK transmission at {self.corrected_freq/1e6:.3f} MHz")
             self.start()
             print("Transmission started successfully")
         except Exception as e:
@@ -170,19 +194,17 @@ def check_hackrf_available():
         return False
 
 def main():
-    parser = argparse.ArgumentParser(description="Aguila GMSK Transmitter")
+    parser = argparse.ArgumentParser(description="Aguila OOK Transmitter")
     parser.add_argument("-f", "--frequency", type=float, default=433.0,
                       help="Frequency in MHz (default: 433.0)")
-    parser.add_argument("-m", "--message", type=str, default="Hello World from Aguila GMSK Transmitter",
+    parser.add_argument("-m", "--message", type=str, default="Hello World from Aguila OOK Transmitter",
                       help="Message to transmit (default: Hello World)")
-    parser.add_argument("-b", "--baud", type=int, default=300,
-                      help="Baud rate in bps (default: 300)")
-    parser.add_argument("-t", "--bt", type=float, default=0.2,
-                      help="BT product for GMSK filter (default: 0.2)")
-    parser.add_argument("-g", "--gain", type=int, default=20,
-                      help="RF gain (default: 20)")
-    parser.add_argument("-s", "--samplerate", type=int, default=48000,
-                      help="Sample rate in Hz (default: 48000)")
+    parser.add_argument("-b", "--baud", type=int, default=500,
+                      help="Baud rate in bps (default: 500)")
+    parser.add_argument("-g", "--gain", type=int, default=15,
+                      help="RF gain (default: 15)")
+    parser.add_argument("-s", "--samplerate", type=float, default=2.0,
+                      help="Sample rate in MHz (default: 2.0)")
     parser.add_argument("-p", "--pattern", action="store_true",
                       help="Use simple alternating pattern instead of message")
     parser.add_argument("-c", "--correction", type=float, default=0,
@@ -196,6 +218,9 @@ def main():
         # Convert frequency from MHz to Hz
         freq_hz = args.frequency * 1e6
         
+        # Convert sample rate from MHz to Hz
+        sample_rate_hz = args.samplerate * 1e6
+        
         # Check if HackRF is available
         if not check_hackrf_available():
             print("ERROR: Unable to proceed without HackRF device")
@@ -206,14 +231,13 @@ def main():
         else:
             print(f"Transmitting '{args.message}' at {args.frequency} MHz")
         
-        # Create and start GMSK transmitter
-        tx = GMSKTransmitter(
+        # Create and start OOK transmitter
+        tx = OOKTransmitter(
             freq=freq_hz, 
             message=args.message, 
             baud_rate=args.baud,
-            bt=args.bt,
             gain=args.gain,
-            sample_rate=args.samplerate,
+            sample_rate=sample_rate_hz,
             use_simple_pattern=args.pattern,
             freq_correction_ppm=args.correction
         )
@@ -233,7 +257,7 @@ def main():
         return 0
         
     except Exception as e:
-        print(f"ERROR: GMSK transmission failed: {e}")
+        print(f"ERROR: OOK transmission failed: {e}")
         import traceback
         traceback.print_exc()
         return 1

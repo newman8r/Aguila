@@ -97,26 +97,27 @@ signals:
 
 public slots:
     void onReceiverDestroyed() { rx_ptr = nullptr; }
+
+private slots:
     void onSendClicked();
     void onReturnPressed();
-    void onChatSelected(int index);
+    void onWorkerMessageReceived(const QString &message);
+    void onWorkerErrorOccurred(const QString &error);
     void onNewChatClicked();
+    void onChatSelected(int index);
     void onChatsLoaded(const QVector<QPair<int, QString>> &chats);
-    void onTabChanged(const QString &tabName);
     void onDspStateChanged(bool running);
-    void runWaterfallOptimizer();
-    void startFMTransmission();
-    void startFSKTransmission();
+    void onTabChanged(const QString &tabName);
+    void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
+    void runWaterfallOptimizer();  // New slot for FFT optimization
+    void startFMTransmission();   // New slot for FM transmission
+    
+    // Spectrum capture slots
     void onCaptureStarted(const SpectrumCapture::CaptureRange& range);
     void onCaptureComplete(const SpectrumCapture::CaptureResult& result);
     void onCaptureError(const std::string& error);
     void onCaptureProgress(int percent);
     void testSpectrumCapture();  // Test function
-
-private slots:
-    void onWorkerMessageReceived(const QString &message);
-    void onWorkerErrorOccurred(const QString &error);
-    void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
 
 private:
     struct Message {
