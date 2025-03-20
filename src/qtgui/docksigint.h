@@ -59,6 +59,11 @@ public slots:
     void createChat(const QString &name);
     void saveSetting(const QString &key, const QString &value);
     void loadSetting(const QString &key);
+    
+    // New lesson management slots
+    void loadAllLessons();
+    void updateLessonAccessed(int lessonId);
+    void updateLessonUnderstanding(int lessonId, int understandingPercent);
 
 signals:
     void messageSaved(qint64 id);
@@ -67,11 +72,16 @@ signals:
     void chatCreated(int chatId, const QString &name);
     void error(const QString &message);
     void settingLoaded(const QString &key, const QString &value);
+    
+    // New lesson signals
+    void lessonsLoaded(const QVector<QMap<QString, QVariant>> &lessons);
+    void lessonUpdated(int lessonId);
 
 private:
     QSqlDatabase db;
     void initializeDatabase();
     void verifyDatabaseState();
+    void initializeLessonsTable(); // New method for lessons table
 };
 
 namespace Ui {
@@ -132,6 +142,16 @@ private:
         QString name;
         QDateTime createdAt;
     };
+    
+    struct Lesson {
+        int id;
+        QString title;
+        int sequenceNumber;
+        int understandingPercent;
+        QDateTime lastAccessed;
+        QString contentFile;
+        QDateTime createdAt;
+    };
 
     // Screenshot functionality
     QString getScreenshotPath() const;
@@ -182,6 +202,11 @@ private:
     void setupTabSystem();
     void moveVisualizerToTab();
 
+    // Lesson management
+    void loadLessons();
+    QVector<Lesson> lessonList;
+    int currentLessonId;
+    
     // Add new member variables
     bool m_lastActiveChatLoaded;
     bool m_chatsLoaded;

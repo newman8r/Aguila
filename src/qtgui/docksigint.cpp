@@ -583,6 +583,250 @@ void DatabaseWorker::loadSetting(const QString &key)
     }
 }
 
+void DatabaseWorker::initializeDatabase()
+{
+    // ... existing code ...
+    
+    // Ensure tables exist - existing code for messages and chats
+    QStringList tables = db.tables();
+    
+    // Create messages table if it doesn't exist
+    if (!tables.contains("messages")) {
+        QSqlQuery createTable(db);
+        createTable.prepare(
+            "CREATE TABLE messages ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "chat_id INTEGER, "
+            "role TEXT, "
+            "content TEXT, "
+            "timestamp DATETIME DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY (chat_id) REFERENCES chats(id)"
+            ")"
+        );
+        
+        if (!createTable.exec()) {
+            qDebug() << "❌ Error creating messages table:" << createTable.lastError().text();
+        } else {
+            qDebug() << "✅ Messages table created successfully";
+        }
+    } else {
+        qDebug() << "✅ Messages table already exists";
+    }
+    
+    // Create chats table if it doesn't exist
+    if (!tables.contains("chats")) {
+        QSqlQuery createTable(db);
+        createTable.prepare(
+            "CREATE TABLE chats ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "name TEXT, "
+            "created_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        );
+        
+        if (!createTable.exec()) {
+            qDebug() << "❌ Error creating chats table:" << createTable.lastError().text();
+        } else {
+            qDebug() << "✅ Chats table created successfully";
+            
+            // Create a default chat
+            QSqlQuery insertChat(db);
+            insertChat.prepare("INSERT INTO chats (name) VALUES ('Chat 1')");
+            if (!insertChat.exec()) {
+                qDebug() << "❌ Error creating default chat:" << insertChat.lastError().text();
+            } else {
+                qDebug() << "✅ Default chat created successfully";
+            }
+        }
+    } else {
+        qDebug() << "✅ Chats table already exists";
+    }
+    
+    // Create settings table if it doesn't exist
+    if (!tables.contains("settings")) {
+        QSqlQuery createTable(db);
+        createTable.prepare(
+            "CREATE TABLE settings ("
+            "key TEXT PRIMARY KEY, "
+            "value TEXT, "
+            "updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        );
+        
+        if (!createTable.exec()) {
+            qDebug() << "❌ Error creating settings table:" << createTable.lastError().text();
+        } else {
+            qDebug() << "✅ Settings table created successfully";
+        }
+    } else {
+        qDebug() << "✅ Settings table already exists";
+    }
+    
+    // Initialize lessons table
+    initializeLessonsTable();
+}
+
+void DatabaseWorker::initializeLessonsTable()
+{
+    qDebug() << "\n=== 📚 Initializing Lessons Table 📚 ===";
+    
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+    
+    QStringList tables = db.tables();
+    
+    // Create lessons table if it doesn't exist
+    if (!tables.contains("lessons")) {
+        QSqlQuery createTable(db);
+        createTable.prepare(
+            "CREATE TABLE lessons ("
+            "id INTEGER PRIMARY KEY, "
+            "title TEXT NOT NULL, "
+            "sequence_number INTEGER NOT NULL, "
+            "understanding_percent INTEGER DEFAULT 0, "
+            "last_accessed TIMESTAMP, "
+            "content_file TEXT NOT NULL, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"
+            ")"
+        );
+        
+        if (!createTable.exec()) {
+            qDebug() << "❌ Error creating lessons table:" << createTable.lastError().text();
+            emit this->error("Failed to create lessons table: " + createTable.lastError().text());
+            return;
+        } else {
+            qDebug() << "✅ Lessons table created successfully";
+            
+            // Insert initial lessons
+            QSqlQuery insertLessonQuery(db);
+            insertLessonQuery.prepare(
+                "INSERT INTO lessons (id, title, sequence_number, content_file) VALUES "
+                "(1, 'Introduction to Radio', 1, 'lessons/intro.md'), "
+                "(2, 'Radio Waves Fundamentals', 2, 'lessons/waves.md'), "
+                "(3, 'AM Modulation', 3, 'lessons/am.md'), "
+                "(4, 'FM Modulation', 4, 'lessons/fm.md'), "
+                "(5, 'Digital Modes', 5, 'lessons/digital.md'), "
+                "(6, 'Software Defined Radio Basics', 6, 'lessons/sdr.md'), "
+                "(7, 'Signal Processing Fundamentals', 7, 'lessons/signal.md'), "
+                "(8, 'Antennas & Propagation', 8, 'lessons/antennas.md'), "
+                "(9, 'Radio Regulations', 9, 'lessons/regulations.md')"
+            );
+            
+            if (!insertLessonQuery.exec()) {
+                qDebug() << "❌ Error inserting initial lessons:" << insertLessonQuery.lastError().text();
+                emit this->error("Failed to insert initial lessons: " + insertLessonQuery.lastError().text());
+            } else {
+                qDebug() << "✅ Initial lessons created successfully";
+            }
+        }
+    } else {
+        qDebug() << "✅ Lessons table already exists";
+    }
+    
+    qDebug() << "=== Lessons Table Initialization Complete ===\n";
+}
+
+void DatabaseWorker::loadAllLessons()
+{
+    qDebug() << "\n=== 📚 Loading All Lessons 📚 ===";
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("SELECT id, title, sequence_number, understanding_percent, last_accessed, content_file, created_at "
+                  "FROM lessons ORDER BY sequence_number ASC");
+    
+    if (!query.exec()) {
+        QString error = "Error loading lessons: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QVector<QMap<QString, QVariant>> lessons;
+    while (query.next()) {
+        QMap<QString, QVariant> lesson;
+        lesson["id"] = query.value(0).toInt();
+        lesson["title"] = query.value(1).toString();
+        lesson["sequence_number"] = query.value(2).toInt();
+        lesson["understanding_percent"] = query.value(3).toInt();
+        lesson["last_accessed"] = query.value(4).toDateTime();
+        lesson["content_file"] = query.value(5).toString();
+        lesson["created_at"] = query.value(6).toDateTime();
+        
+        lessons.append(lesson);
+        qDebug() << "📚 Loaded lesson:" << lesson["id"].toInt() << "-" << lesson["title"].toString();
+    }
+
+    qDebug() << "✅ Loaded" << lessons.size() << "lessons";
+    emit lessonsLoaded(lessons);
+}
+
+void DatabaseWorker::updateLessonAccessed(int lessonId)
+{
+    qDebug() << "\n=== 📚 Updating Lesson Access Time 📚 ===";
+    qDebug() << "Lesson ID:" << lessonId;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("UPDATE lessons SET last_accessed = CURRENT_TIMESTAMP WHERE id = ?");
+    query.addBindValue(lessonId);
+    
+    if (!query.exec()) {
+        QString error = "Error updating lesson access time: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    qDebug() << "✅ Lesson access time updated successfully";
+    emit lessonUpdated(lessonId);
+}
+
+void DatabaseWorker::updateLessonUnderstanding(int lessonId, int understandingPercent)
+{
+    qDebug() << "\n=== 📚 Updating Lesson Understanding 📚 ===";
+    qDebug() << "Lesson ID:" << lessonId;
+    qDebug() << "Understanding:" << understandingPercent << "%";
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("UPDATE lessons SET understanding_percent = ? WHERE id = ?");
+    query.addBindValue(understandingPercent);
+    query.addBindValue(lessonId);
+    
+    if (!query.exec()) {
+        QString error = "Error updating lesson understanding: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    qDebug() << "✅ Lesson understanding updated successfully";
+    emit lessonUpdated(lessonId);
+}
+
 DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     QDockWidget(parent),
     ui(new Ui::DockSigint),
@@ -604,7 +848,9 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     dsp_running(false),
     currentTab("spectrum"),
     spectrumContainer(nullptr),
-    waterfallContainer(nullptr)
+    waterfallContainer(nullptr),
+    lessonList(),
+    currentLessonId(0)
 {
     qDebug() << "\n=== 🚀 SIGINT Panel Starting Up 🚀 ===";
     
@@ -943,6 +1189,59 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     m_chatsLoaded = false;
 
     updateLessonSelector();
+    
+    // Add connections for lessons
+    connect(databaseWorker, &DatabaseWorker::lessonsLoaded, this, [this](const QVector<QMap<QString, QVariant>> &lessons) {
+        lessonList.clear();
+        for (const auto &lessonMap : lessons) {
+            Lesson lesson;
+            lesson.id = lessonMap["id"].toInt();
+            lesson.title = lessonMap["title"].toString();
+            lesson.sequenceNumber = lessonMap["sequence_number"].toInt();
+            lesson.understandingPercent = lessonMap["understanding_percent"].toInt();
+            lesson.lastAccessed = lessonMap["last_accessed"].toDateTime();
+            lesson.contentFile = lessonMap["content_file"].toString();
+            lesson.createdAt = lessonMap["created_at"].toDateTime();
+            lessonList.append(lesson);
+        }
+        
+        // Update the lessons dropdown
+        updateLessonSelector();
+        
+        // If we have a last accessed lesson, select it
+        if (!lessonList.isEmpty()) {
+            Lesson mostRecentLesson;
+            bool hasAccessedLesson = false;
+            
+            // Find the most recently accessed lesson
+            for (const auto &lesson : lessonList) {
+                if (lesson.lastAccessed.isValid() && 
+                    (!hasAccessedLesson || lesson.lastAccessed > mostRecentLesson.lastAccessed)) {
+                    mostRecentLesson = lesson;
+                    hasAccessedLesson = true;
+                }
+            }
+            
+            if (hasAccessedLesson) {
+                // Select the most recently accessed lesson
+                currentLessonId = mostRecentLesson.id;
+                int index = ui->lessonSelector->findData(currentLessonId);
+                if (index != -1) {
+                    ui->lessonSelector->blockSignals(true);
+                    ui->lessonSelector->setCurrentIndex(index);
+                    ui->lessonSelector->blockSignals(false);
+                }
+            }
+        }
+    });
+    
+    // ... existing code ...
+    
+    // Load lessons
+    loadLessons();
+    
+    m_lastActiveChatLoaded = false;
+    m_chatsLoaded = false;
 }
 
 DockSigint::~DockSigint()
@@ -2163,15 +2462,32 @@ void DockSigint::updateLessonSelector()
 {
     ui->lessonSelector->clear();
     ui->lessonSelector->addItem("Select a Lesson", "");
-    ui->lessonSelector->addItem("Introduction to Radio", "intro");
-    ui->lessonSelector->addItem("Radio Waves Fundamentals", "waves");
-    ui->lessonSelector->addItem("AM Modulation", "am");
-    ui->lessonSelector->addItem("FM Modulation", "fm");
-    ui->lessonSelector->addItem("Digital Modes", "digital");
-    ui->lessonSelector->addItem("Software Defined Radio Basics", "sdr");
-    ui->lessonSelector->addItem("Signal Processing Fundamentals", "signal");
-    ui->lessonSelector->addItem("Antennas & Propagation", "antennas");
-    ui->lessonSelector->addItem("Radio Regulations", "regulations");
+    
+    for (const auto &lesson : lessonList) {
+        // Format: "1. Introduction to Radio (25%)" if there's understanding progress
+        QString displayText = QString("%1. %2").arg(lesson.sequenceNumber).arg(lesson.title);
+        if (lesson.understandingPercent > 0) {
+            displayText += QString(" (%1%)").arg(lesson.understandingPercent);
+        }
+        ui->lessonSelector->addItem(displayText, lesson.id);
+    }
+    
+    // Set current lesson if there is one
+    if (currentLessonId > 0) {
+        int index = ui->lessonSelector->findData(currentLessonId);
+        if (index != -1) {
+            ui->lessonSelector->blockSignals(true);
+            ui->lessonSelector->setCurrentIndex(index);
+            ui->lessonSelector->blockSignals(false);
+        }
+    }
+}
+
+void DockSigint::loadLessons()
+{
+    qDebug() << "\n=== 📚 Loading Lessons ===";
+    databaseWorker->loadAllLessons();
+    qDebug() << "=== Finished Loading Request ===\n";
 }
 
 void DockSigint::onLessonSelected(int index)
@@ -2180,7 +2496,7 @@ void DockSigint::onLessonSelected(int index)
         return; // Skip the "Select a Lesson" option
     }
     
-    QString lessonId = ui->lessonSelector->itemData(index).toString();
+    int lessonId = ui->lessonSelector->itemData(index).toInt();
     QString lessonName = ui->lessonSelector->itemText(index);
     
     qDebug() << "\n=== 📚 Lesson Selected ===";
@@ -2188,8 +2504,39 @@ void DockSigint::onLessonSelected(int index)
     qDebug() << "  - ID:" << lessonId;
     qDebug() << "=================================\n";
     
-    // For now, just show a welcome message for the selected lesson
-    // We'll implement actual lesson content in future iterations
-    appendMessage("📚 Welcome to the lesson: " + lessonName, false);
-    appendMessage("This lesson will teach you about " + lessonName + ". We'll implement the full content in a future update.", false);
+    // Update the current lesson ID
+    currentLessonId = lessonId;
+    
+    // Update the last accessed time in the database
+    databaseWorker->updateLessonAccessed(lessonId);
+    
+    // Find the selected lesson
+    Lesson selectedLesson;
+    bool found = false;
+    for (const auto &lesson : lessonList) {
+        if (lesson.id == lessonId) {
+            selectedLesson = lesson;
+            found = true;
+            break;
+        }
+    }
+    
+    if (!found) {
+        appendMessage("❌ Error: Could not find the selected lesson", false);
+        return;
+    }
+    
+    // Show welcome message for the selected lesson
+    appendMessage("📚 Welcome to the lesson: " + selectedLesson.title, false);
+    
+    // Load the lesson content from the markdown file
+    QString lessonFilePath = QCoreApplication::applicationDirPath() + "/../" + selectedLesson.contentFile;
+    QFile lessonFile(lessonFilePath);
+    if (lessonFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        QString content = QString::fromUtf8(lessonFile.readAll());
+        lessonFile.close();
+        appendMessage(content, false);
+    } else {
+        appendMessage("Lesson content will be available soon. We're still developing this educational platform.", false);
+    }
 }
