@@ -64,6 +64,11 @@ public slots:
     void loadAllLessons();
     void updateLessonAccessed(int lessonId);
     void updateLessonUnderstanding(int lessonId, int understandingPercent);
+    
+    // New lesson chat management slots
+    void getLessonChat(int lessonId);
+    void createLessonChat(int lessonId);
+    void updateLessonChatAccessed(int lessonId);
 
 signals:
     void messageSaved(qint64 id);
@@ -76,6 +81,10 @@ signals:
     // New lesson signals
     void lessonsLoaded(const QVector<QMap<QString, QVariant>> &lessons);
     void lessonUpdated(int lessonId);
+    
+    // New lesson chat signals
+    void lessonChatLoaded(int lessonId, int chatId);
+    void lessonChatCreated(int lessonId, int chatId);
 
 private:
     QSqlDatabase db;
@@ -198,7 +207,7 @@ private:
     void switchToChat(int chatId);
     void updateChatSelector();
     void updateLessonSelector();
-    void clearChat();
+    void clearChat(std::function<void()> callback = nullptr);
     void setupTabSystem();
     void moveVisualizerToTab();
 
@@ -206,6 +215,10 @@ private:
     void loadLessons();
     QVector<Lesson> lessonList;
     int currentLessonId;
+    
+    // Lesson chat management
+    void switchToLessonChat(int lessonId);
+    bool isLessonChat; // Flag to indicate if we're in a lesson chat
     
     // Add new member variables
     bool m_lastActiveChatLoaded;

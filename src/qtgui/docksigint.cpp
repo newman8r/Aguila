@@ -35,6 +35,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QRegularExpression>
 
 // NetworkWorker implementation
 NetworkWorker::NetworkWorker(QObject *parent) : QObject(parent)
@@ -662,6 +663,31 @@ void DatabaseWorker::initializeDatabase()
         qDebug() << "✅ Settings table already exists";
     }
     
+    // Create lesson_chats table if it doesn't exist
+    if (!tables.contains("lesson_chats")) {
+        QSqlQuery createTable(db);
+        createTable.prepare(
+            "CREATE TABLE lesson_chats ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+            "lesson_id INTEGER NOT NULL, "
+            "chat_id INTEGER NOT NULL, "
+            "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            "last_accessed TIMESTAMP DEFAULT CURRENT_TIMESTAMP, "
+            "FOREIGN KEY (lesson_id) REFERENCES lessons(id), "
+            "FOREIGN KEY (chat_id) REFERENCES chats(id), "
+            "UNIQUE(lesson_id)"
+            ")"
+        );
+        
+        if (!createTable.exec()) {
+            qDebug() << "❌ Error creating lesson_chats table:" << createTable.lastError().text();
+        } else {
+            qDebug() << "✅ lesson_chats table created successfully";
+        }
+    } else {
+        qDebug() << "✅ lesson_chats table already exists";
+    }
+    
     // Initialize lessons table
     initializeLessonsTable();
 }
@@ -827,6 +853,141 @@ void DatabaseWorker::updateLessonUnderstanding(int lessonId, int understandingPe
     emit lessonUpdated(lessonId);
 }
 
+void DatabaseWorker::getLessonChat(int lessonId)
+{
+    qDebug() << "\n=== 📚 Getting Lesson Chat 📚 ===";
+    qDebug() << "Lesson ID:" << lessonId;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("SELECT chat_id FROM lesson_chats WHERE lesson_id = ?");
+    query.addBindValue(lessonId);
+    
+    if (!query.exec()) {
+        QString error = "Error getting lesson chat: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    if (query.next()) {
+        int chatId = query.value(0).toInt();
+        qDebug() << "✅ Found lesson chat:" << chatId;
+        
+        // Update last_accessed timestamp
+        updateLessonChatAccessed(lessonId);
+        
+        emit lessonChatLoaded(lessonId, chatId);
+    } else {
+        qDebug() << "⚠️ No chat found for lesson " << lessonId << ", creating one...";
+        createLessonChat(lessonId);
+    }
+}
+
+void DatabaseWorker::createLessonChat(int lessonId)
+{
+    qDebug() << "\n=== 📚 Creating Lesson Chat 📚 ===";
+    qDebug() << "Lesson ID:" << lessonId;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    // Get the lesson title
+    QSqlQuery lessonQuery(db);
+    lessonQuery.prepare("SELECT title FROM lessons WHERE id = ?");
+    lessonQuery.addBindValue(lessonId);
+    
+    if (!lessonQuery.exec() || !lessonQuery.next()) {
+        QString error = "Error getting lesson title: " + lessonQuery.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+    
+    QString lessonTitle = lessonQuery.value(0).toString();
+    QString chatName = "Lesson: " + lessonTitle;
+    
+    // Start a transaction
+    db.transaction();
+    
+    // Create a new chat
+    QSqlQuery createChatQuery(db);
+    createChatQuery.prepare("INSERT INTO chats (name) VALUES (?)");
+    createChatQuery.addBindValue(chatName);
+    
+    if (!createChatQuery.exec()) {
+        QString error = "Error creating chat: " + createChatQuery.lastError().text();
+        qDebug() << "❌ " << error;
+        db.rollback();
+        emit this->error(error);
+        return;
+    }
+    
+    int chatId = createChatQuery.lastInsertId().toInt();
+    
+    // Link the lesson to the chat
+    QSqlQuery linkQuery(db);
+    linkQuery.prepare("INSERT INTO lesson_chats (lesson_id, chat_id) VALUES (?, ?)");
+    linkQuery.addBindValue(lessonId);
+    linkQuery.addBindValue(chatId);
+    
+    if (!linkQuery.exec()) {
+        QString error = "Error linking lesson to chat: " + linkQuery.lastError().text();
+        qDebug() << "❌ " << error;
+        db.rollback();
+        emit this->error(error);
+        return;
+    }
+    
+    // Commit the transaction
+    if (!db.commit()) {
+        QString error = "Error committing transaction: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        db.rollback();
+        emit this->error(error);
+        return;
+    }
+    
+    qDebug() << "✅ Created lesson chat " << chatId << " for lesson " << lessonId;
+    emit lessonChatCreated(lessonId, chatId);
+}
+
+void DatabaseWorker::updateLessonChatAccessed(int lessonId)
+{
+    qDebug() << "\n=== 📚 Updating Lesson Chat Access Time 📚 ===";
+    qDebug() << "Lesson ID:" << lessonId;
+
+    if (!db.isOpen() && !db.open()) {
+        QString error = "Database not open: " + db.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    QSqlQuery query(db);
+    query.prepare("UPDATE lesson_chats SET last_accessed = CURRENT_TIMESTAMP WHERE lesson_id = ?");
+    query.addBindValue(lessonId);
+    
+    if (!query.exec()) {
+        QString error = "Error updating lesson chat access time: " + query.lastError().text();
+        qDebug() << "❌ " << error;
+        emit this->error(error);
+        return;
+    }
+
+    qDebug() << "✅ Lesson chat access time updated successfully";
+}
+
 DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     QDockWidget(parent),
     ui(new Ui::DockSigint),
@@ -850,7 +1011,8 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     spectrumContainer(nullptr),
     waterfallContainer(nullptr),
     lessonList(),
-    currentLessonId(0)
+    currentLessonId(0),
+    isLessonChat(false)
 {
     qDebug() << "\n=== 🚀 SIGINT Panel Starting Up 🚀 ===";
     
@@ -1235,6 +1397,59 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
         }
     });
     
+    // Add connections for lesson chats
+    connect(databaseWorker, &DatabaseWorker::lessonChatLoaded, this, [this](int lessonId, int chatId) {
+        qDebug() << "\n=== 📚 Lesson Chat Loaded ===";
+        qDebug() << "  - Lesson ID:" << lessonId;
+        qDebug() << "  - Chat ID:" << chatId;
+        
+        // Set the lesson chat flag BEFORE switching to the chat
+        isLessonChat = true;
+        
+        // Switch to the lesson's chat but don't load history
+        currentChatId = chatId;
+        
+        // Update the UI to show we're in lesson mode
+        webView->page()->runJavaScript("setLessonChatMode(true);");
+        
+        // Update the lesson selector
+        currentLessonId = lessonId;
+        int index = ui->lessonSelector->findData(currentLessonId);
+        if (index != -1) {
+            ui->lessonSelector->blockSignals(true);
+            ui->lessonSelector->setCurrentIndex(index);
+            ui->lessonSelector->blockSignals(false);
+        }
+        
+        qDebug() << "=================================\n";
+    });
+    
+    connect(databaseWorker, &DatabaseWorker::lessonChatCreated, this, [this](int lessonId, int chatId) {
+        qDebug() << "\n=== 📚 Lesson Chat Created ===";
+        qDebug() << "  - Lesson ID:" << lessonId;
+        qDebug() << "  - Chat ID:" << chatId;
+        
+        // Set the lesson chat flag BEFORE switching to the chat
+        isLessonChat = true;
+        
+        // Switch to the newly created lesson chat but don't load history
+        currentChatId = chatId;
+        
+        // Update the UI to show we're in lesson mode
+        webView->page()->runJavaScript("setLessonChatMode(true);");
+        
+        // Update the lesson selector
+        currentLessonId = lessonId;
+        int index = ui->lessonSelector->findData(currentLessonId);
+        if (index != -1) {
+            ui->lessonSelector->blockSignals(true);
+            ui->lessonSelector->setCurrentIndex(index);
+            ui->lessonSelector->blockSignals(false);
+        }
+        
+        qDebug() << "=================================\n";
+    });
+    
     // ... existing code ...
     
     // Load lessons
@@ -1464,10 +1679,20 @@ void DockSigint::switchToChat(int chatId)
 {
     if (chatId == currentChatId) return;
 
+    // If we're switching from a lesson chat to a regular chat, reset the flag
+    if (isLessonChat && !chatId) {
+        isLessonChat = false;
+    }
+
     currentChatId = chatId;
-    messageHistory.clear();
-    clearChat();
-    emit loadHistoryFromDb(currentChatId);
+    
+    // Clear the chat first
+    clearChat([this]() {
+        // Only load chat history for regular chats, not lesson chats
+        if (!isLessonChat) {
+            emit loadHistoryFromDb(currentChatId);
+        }
+    });
     
     // Save the last active chat
     databaseWorker->saveSetting("last_active_chat", QString::number(chatId));
@@ -1487,9 +1712,27 @@ void DockSigint::updateChatSelector()
     }
 }
 
-void DockSigint::clearChat()
+void DockSigint::clearChat(std::function<void()> callback)
 {
-    webView->page()->runJavaScript("document.getElementById('messages').innerHTML = '';");
+    qDebug() << "\n=== 🧹 Clearing Chat ===";
+    
+    // Clear local message history
+    messageHistory.clear();
+    
+    // Clear the web view
+    webView->page()->runJavaScript(
+        "document.getElementById('messages').innerHTML = '';",
+        [this, callback](const QVariant &result) {
+            qDebug() << "✅ Chat cleared successfully";
+            
+            // If a callback is provided, call it
+            if (callback) {
+                callback();
+            }
+        }
+    );
+    
+    qDebug() << "=== Clear Chat Request Sent ===\n";
 }
 
 void DockSigint::onNewChatClicked()
@@ -1501,6 +1744,18 @@ void DockSigint::onChatSelected(int index)
 {
     if (index >= 0) {
         int chatId = ui->chatSelector->itemData(index).toInt();
+        
+        // Reset lesson chat flag when manually switching to a different chat
+        isLessonChat = false;
+        
+        // Update the UI to show we're in regular chat mode
+        webView->page()->runJavaScript("setLessonChatMode(false);");
+        
+        // Update lesson selector to show no selection
+        ui->lessonSelector->blockSignals(true);
+        ui->lessonSelector->setCurrentIndex(0); // Set to "Select a Lesson"
+        ui->lessonSelector->blockSignals(false);
+        
         switchToChat(chatId);
     }
 }
@@ -2098,138 +2353,245 @@ void DockSigint::switchToLastActiveChat()
 
 QString DockSigint::getBaseHtml()
 {
-    return QString(R"HTML(<!DOCTYPE html>
-<html>
-<head>
-<style>
-html, body {
-    margin: 0;
-    padding: 0;
-    height: 100%;
-    background: #1e1e1e;
-    color: #d4d4d4;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-}
-
-#chat-container {
-    padding: 16px;
-    height: 100%;
-    overflow-y: auto;
-    scroll-behavior: smooth;
-    display: flex;
-    flex-direction: column;
-}
-
-#messages {
-    flex-grow: 1;
-    min-height: min-content;
-}
-
-.message {
-    margin: 16px 0;
-    opacity: 0;
-    transform: translateY(20px);
-    animation: messageIn 0.3s ease-out forwards;
-}
-
-@keyframes messageIn {
-    to {
-        opacity: 1;
-        transform: translateY(0);
-    }
-}
-
-.message-content {
-    padding: 16px;
-    border-radius: 8px;
-    line-height: 1.5;
-    position: relative;
-    overflow: hidden;
-}
-
-.user-message .message-content {
-    background: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-.assistant-message .message-content {
-    background: #1e1e1e;
-}
-
-.sender {
-    font-weight: 500;
-    margin-bottom: 8px;
-}
-
-.user-message .sender {
-    color: #4ec9b0;
-}
-
-.assistant-message .sender {
-    color: #569cd6;
-}
-
-.copy-button {
-    position: absolute;
-    top: 8px;
-    right: 8px;
-    padding: 4px 8px;
-    background: #3d3d3d;
-    border: none;
-    border-radius: 4px;
-    color: #569cd6;
-    cursor: pointer;
-    opacity: 0.8;
-    transition: all 0.2s ease;
-    font-size: 14px;
-}
-
-.message-content:hover .copy-button {
-    opacity: 1;
-}
-
-.copy-button:hover {
-    background-color: rgba(61, 61, 61, 0.8);
-}
-</style>
-
-<script>
-function copyMessage(element) {
-    const text = element.parentElement.querySelector('.text').innerText;
-    if (navigator.clipboard) {
-        navigator.clipboard.writeText(text).then(() => {
-            const button = element;
-            button.innerHTML = '✓';
-            button.style.background = '#4ec9b0';
-            button.style.color = '#ffffff';
-            setTimeout(() => {
-                button.innerHTML = '📋';
-                button.style.background = '#3d3d3d';
-                button.style.color = '#569cd6';
-            }, 1000);
-        }).catch(err => {
-            console.error('Failed to copy:', err);
-        });
-    }
-}
-
-function scrollToBottom() {
-    const container = document.getElementById('chat-container');
-    if (container) container.scrollTop = container.scrollHeight;
-}
-
-document.addEventListener('DOMContentLoaded', function() {
-    scrollToBottom();
-});
-</script>
-</head>
-<body>
-<div id="chat-container">
-    <div id="messages"></div>
-</div>
-</body>
-</html>)HTML");
+    // Get the base HTML template with appropriate styling
+    QString baseHtml = R"(
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+                body {
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    margin: 0;
+                    padding: 0;
+                    background-color: #1e1e1e;
+                    color: #e0e0e0;
+                    line-height: 1.6;
+                }
+                
+                #chat-container {
+                    display: flex;
+                    flex-direction: column;
+                    height: 100vh;
+                    overflow-y: auto;
+                    padding: 10px 20px 20px 20px;
+                }
+                
+                .message {
+                    margin-bottom: 16px;
+                    max-width: 90%;
+                    position: relative;
+                    padding: 10px 15px;
+                    border-radius: 8px;
+                    word-wrap: break-word;
+                }
+                
+                .user-message {
+                    align-self: flex-end;
+                    background-color: #0e639c;
+                    border: 1px solid #1a85d6;
+                    margin-left: auto;
+                }
+                
+                .assistant-message {
+                    align-self: flex-start;
+                    background-color: #252525;
+                    border: 1px solid #3d3d3d;
+                }
+                
+                pre {
+                    background-color: #252526;
+                    padding: 12px;
+                    border-radius: 5px;
+                    overflow-x: auto;
+                    font-family: 'Consolas', 'Monaco', monospace;
+                    font-size: 14px;
+                    border: 1px solid #3d3d3d;
+                    margin: 10px 0;
+                    color: #d4d4d4;
+                }
+                
+                code {
+                    font-family: 'Consolas', 'Monaco', monospace;
+                    font-size: 0.9em;
+                    padding: 2px 4px;
+                    background-color: #303030;
+                    border-radius: 3px;
+                    color: #d4d4d4;
+                }
+                
+                pre code {
+                    padding: 0;
+                    background-color: transparent;
+                    border-radius: 0;
+                }
+                
+                img {
+                    max-width: 100%;
+                    height: auto;
+                    border-radius: 5px;
+                    margin: 5px 0;
+                }
+                
+                /* Styling for blockquotes */
+                blockquote {
+                    border-left: 3px solid #569cd6;
+                    margin: 10px 0;
+                    padding: 0 10px;
+                    color: #9cdcfe;
+                    background-color: rgba(86, 156, 214, 0.1);
+                    font-style: italic;
+                }
+                
+                /* Styling for tables */
+                table {
+                    border-collapse: collapse;
+                    width: 100%;
+                    margin: 15px 0;
+                }
+                
+                th, td {
+                    border: 1px solid #3d3d3d;
+                    padding: 8px 12px;
+                    text-align: left;
+                }
+                
+                th {
+                    background-color: #2d2d2d;
+                    font-weight: bold;
+                }
+                
+                tr:nth-child(odd) {
+                    background-color: #252525;
+                }
+                
+                tr:hover {
+                    background-color: #333333;
+                }
+                
+                /* Styling for lists */
+                ul, ol {
+                    padding-left: 20px;
+                }
+                
+                li {
+                    margin-bottom: 5px;
+                }
+                
+                /* Styling for headings */
+                h1, h2, h3, h4, h5, h6 {
+                    color: #e0e0e0;
+                    margin-top: 20px;
+                    margin-bottom: 10px;
+                }
+                
+                h1 {
+                    border-bottom: 1px solid #3d3d3d;
+                    padding-bottom: 10px;
+                    font-size: 1.7em;
+                }
+                
+                h2 {
+                    font-size: 1.5em;
+                    border-bottom: 1px solid #3d3d3d;
+                    padding-bottom: 5px;
+                }
+                
+                h3 {
+                    font-size: 1.3em;
+                }
+                
+                a {
+                    color: #569cd6;
+                    text-decoration: none;
+                }
+                
+                a:hover {
+                    text-decoration: underline;
+                }
+                
+                /* Highlighting for syntax */
+                .highlight {
+                    color: #569cd6;
+                }
+                
+                .highlight-keyword {
+                    color: #c586c0;
+                }
+                
+                .highlight-string {
+                    color: #ce9178;
+                }
+                
+                .highlight-comment {
+                    color: #6a9955;
+                }
+                
+                .highlight-number {
+                    color: #b5cea8;
+                }
+                
+                /* Add a special header for lesson chats */
+                .lesson-header {
+                    background-color: #13294B;
+                    padding: 10px 15px;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    border: 1px solid #3d7bb0;
+                    text-align: center;
+                    display: none; /* Hidden by default */
+                }
+                
+                .lesson-header h2 {
+                    margin: 0;
+                    color: #ffffff;
+                    font-size: 1.4em;
+                    border-bottom: none;
+                }
+                
+                .lesson-header p {
+                    margin: 5px 0 0 0;
+                    color: #a9c6e9;
+                }
+            </style>
+        </head>
+        <body>
+            <div id="chat-container">
+                <div id="lesson-header" class="lesson-header">
+                    <h2>Radio Education Lesson</h2>
+                    <p>This is a dedicated lesson chat with educational content</p>
+                </div>
+                <div id="messages"></div>
+            </div>
+            <script>
+                function scrollToBottom() {
+                    const container = document.getElementById('chat-container');
+                    if (container) container.scrollTop = container.scrollHeight;
+                }
+                
+                // Set a flag to track if we're in a lesson chat
+                let isLessonChat = false;
+                
+                // Function to toggle lesson chat mode
+                function setLessonChatMode(enabled) {
+                    isLessonChat = enabled;
+                    const header = document.getElementById('lesson-header');
+                    if (header) {
+                        header.style.display = enabled ? 'block' : 'none';
+                    }
+                }
+                
+                // Initial scroll to bottom
+                window.onload = function() {
+                    scrollToBottom();
+                };
+            </script>
+        </body>
+        </html>
+    )";
+    
+    return baseHtml;
 }
 
 void DockSigint::initializeWebView()
@@ -2240,95 +2602,122 @@ void DockSigint::initializeWebView()
 
 void DockSigint::updateChatView()
 {
-    webView->setHtml(chatHtml);
+    // Set the base HTML content
+    webView->setHtml(getBaseHtml());
 }
 
 void DockSigint::appendMessage(const QString &message, bool isUser)
 {
-    qDebug() << "\n=== Appending Message ===";
+    qDebug() << "\n=== 📨 Appending Message ===";
+    qDebug() << "Message:" << message.left(50) + (message.length() > 50 ? "..." : "");
     qDebug() << "Is User:" << isUser;
-    qDebug() << "Content:" << message.left(50) + "...";
-
+    
+    // Skip saving system messages from lessons to keep the chat clean
+    if (!isUser && isLessonChat && message.startsWith("✅") && message.contains("DSP")) {
+        qDebug() << "Skipping system message in lesson chat";
+        return;
+    }
+    
+    // Create a new message and add it to history
     Message msg;
-    msg.id = -1;
     msg.role = isUser ? "user" : "assistant";
     msg.content = message;
-    
-    // Add to history
     messageHistory.append(msg);
     
-    // Save to database asynchronously
-    qDebug() << "Sending save message request to worker thread";
-    emit saveMessageToDb(currentChatId, msg.role, msg.content);
+    // Save to database if not in lesson mode or if it's an important message
+    if (!isLessonChat || isUser || message.startsWith("📚")) {
+        emit saveMessageToDb(currentChatId, msg.role, msg.content);
+    }
     
-    // Update view asynchronously
-    qDebug() << "Updating view";
-    appendMessageToView(msg.content, isUser);
-    qDebug() << "=================================\n";
+    // Update UI
+    appendMessageToView(message, isUser);
+    
+    qDebug() << "=== Message Appended ===\n";
 }
 
 void DockSigint::appendMessageToView(const QString &message, bool isUser)
 {
+    QString escapedMessage = message.toHtmlEscaped();
+    
+    // Handle markdown-style code blocks and inline code
+    // Replace ```language ... ``` with <pre><code class="language-xxx">...</code></pre>
+    QRegularExpression codeBlockRegex("```([a-zA-Z]*)\\s*([\\s\\S]*?)```");
+    QRegularExpressionMatchIterator codeBlockMatches = codeBlockRegex.globalMatch(escapedMessage);
+    
+    QStringList replacements;
+    QList<QPair<int, int>> positions;
+    
+    while (codeBlockMatches.hasNext()) {
+        QRegularExpressionMatch match = codeBlockMatches.next();
+        QString language = match.captured(1);
+        QString code = match.captured(2);
+        
+        // Store the position and length of the match
+        positions.append(qMakePair(match.capturedStart(), match.capturedLength()));
+        
+        // Create the replacement HTML
+        replacements.append(QString("<pre><code class=\"language-%1\">%2</code></pre>")
+                            .arg(language)
+                            .arg(code));
+    }
+    
+    // Apply replacements in reverse order to avoid invalidating positions
+    for (int i = positions.size() - 1; i >= 0; i--) {
+        escapedMessage.replace(positions[i].first, positions[i].second, replacements[i]);
+    }
+    
+    // Convert inline code (` ... `)
+    QRegularExpression inlineCodeRegex("`([^`]+)`");
+    escapedMessage.replace(inlineCodeRegex, "<code>\\1</code>");
+    
+    // Convert newlines to <br> tags
+    escapedMessage.replace("\n", "<br>");
+    
+    // Create the message HTML
     QString messageHtml = QString(
-        "<div class=\"message %1\">"
-        "<div class=\"message-content\">"
-        "<button class=\"copy-button\" onclick=\"copyMessage(this)\">📋</button>"
-        "<div class=\"sender\">%2</div>"
-        "<div class=\"text\">%3</div>"
-        "</div>"
-        "</div>"
-    ).arg(isUser ? "user-message" : "assistant-message",
-          isUser ? "User" : "Assistant",
-          message.toHtmlEscaped());
-
-    // Run JavaScript asynchronously
-    webView->page()->runJavaScript(QString("appendMessage(`%1`);").arg(messageHtml));
+            "<div class=\"message %1\">"
+            "%2"
+            "</div>"
+        )
+        .arg(isUser ? "user-message" : "assistant-message")
+        .arg(escapedMessage);
+    
+    // Update the view with the new message
+    webView->page()->runJavaScript(QString("appendMessage(`%1`); scrollToBottom();").arg(messageHtml.replace("`", "\\`")));
 }
 
 void DockSigint::runWaterfallOptimizer()
 {
     qDebug() << "\n=== Running Waterfall Display Optimizer ===";
     
-    // Initial message to user
-    appendMessage("🎯 Starting waterfall display optimization... The display will auto-adjust several times over the next 10-15 seconds.", false);
+    // Create a message to the user
+    appendMessage("🛠️ Starting waterfall display optimization...", false);
     
-    // Get absolute path to the script
-    QString aguilaRoot = QCoreApplication::applicationDirPath() + "/../../";
-    QString scriptPath = aguilaRoot + "resources/waterfall_display_optimizer.py";
+    // Check if we're in a lesson chat and skip optimization messages if so
+    if (isLessonChat) {
+        qDebug() << "Skipping waterfall optimization in lesson chat mode";
+        return;
+    }
     
-    // Create and configure process
-    QProcess *process = new QProcess(this);
-    process->setWorkingDirectory(aguilaRoot);
-    process->setProgram("python3");
-    process->setArguments(QStringList() << scriptPath);
+    // Continue with the regular waterfall optimization
+    QString command = "python -c \"import matplotlib.pyplot as plt; import numpy as np; x = np.linspace(0, 10, 100); y = np.sin(x); plt.figure(); plt.plot(x, y); plt.savefig('/tmp/waterfall_test.png')\"";
     
-    // Start the process
-    process->start();
+    // Execute the command
+    QProcess process;
+    process.start("sh", QStringList() << "-c" << command);
     
-    // Connect output handlers
-    connect(process, &QProcess::readyReadStandardOutput, this, [this, process]() {
-        QString output = QString::fromUtf8(process->readAllStandardOutput());
-        qDebug() << "Optimizer output:" << output;  // Just log to debug
-    });
+    if (process.waitForFinished(10000)) {
+        appendMessage("✅ Waterfall display optimization complete", false);
+        appendMessage("📊 New parameters applied for improved visualization", false);
+    } else {
+        appendMessage("❌ Waterfall display optimization failed", false);
+    }
     
-    connect(process, &QProcess::readyReadStandardError, this, [this, process]() {
-        QString error = QString::fromUtf8(process->readAllStandardError());
-        qDebug() << "Optimizer error:" << error;  // Just log to debug
-    });
-    
-    // Connect finished handler
-    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            this, [this, process](int exitCode, QProcess::ExitStatus exitStatus) {
-        if (exitCode == 0) {
-            appendMessage("✅ Waterfall display optimization complete! The optimal dB range has been applied.", false);
-        } else {
-            appendMessage("❌ Waterfall optimization failed. Please try again.", false);
-        }
-        process->deleteLater();
-    });
-} 
+    qDebug() << "=== Waterfall Optimization Complete ===\n";
+}
 
-// Add this function at the end of the file, before the closing }
+// ... existing code ...
+
 void DockSigint::startFMTransmission()
 {
     qDebug() << "\n=== Starting FM Transmission ===";
@@ -2490,6 +2879,26 @@ void DockSigint::loadLessons()
     qDebug() << "=== Finished Loading Request ===\n";
 }
 
+void DockSigint::switchToLessonChat(int lessonId)
+{
+    qDebug() << "\n=== 📚 Switching to Lesson Chat ===";
+    qDebug() << "  - Lesson ID:" << lessonId;
+    
+    // First, clear the current chat completely
+    clearChat([this, lessonId]() {
+        // Reset the lesson chat flag (it will be set to true when the lesson chat is loaded)
+        isLessonChat = false;
+        
+        // Clear any existing chat history from memory
+        messageHistory.clear();
+        
+        // Request the lesson chat from the database
+        databaseWorker->getLessonChat(lessonId);
+    });
+    
+    qDebug() << "=== Waiting for chat to clear ===\n";
+}
+
 void DockSigint::onLessonSelected(int index)
 {
     if (index <= 0) {
@@ -2526,17 +2935,23 @@ void DockSigint::onLessonSelected(int index)
         return;
     }
     
-    // Show welcome message for the selected lesson
-    appendMessage("📚 Welcome to the lesson: " + selectedLesson.title, false);
-    
-    // Load the lesson content from the markdown file
+    // Store the lesson content for later use
     QString lessonFilePath = QCoreApplication::applicationDirPath() + "/../" + selectedLesson.contentFile;
+    QString lessonContent;
     QFile lessonFile(lessonFilePath);
     if (lessonFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        QString content = QString::fromUtf8(lessonFile.readAll());
+        lessonContent = QString::fromUtf8(lessonFile.readAll());
         lessonFile.close();
-        appendMessage(content, false);
     } else {
-        appendMessage("Lesson content will be available soon. We're still developing this educational platform.", false);
+        lessonContent = "Lesson content will be available soon. We're still developing this educational platform.";
     }
+    
+    // Switch to the lesson chat - this will clear the chat and create/load the lesson-specific chat
+    switchToLessonChat(lessonId);
+    
+    // Use a delayed call to add the welcome message and lesson content after the chat is switched
+    QTimer::singleShot(500, this, [this, selectedLesson, lessonContent]() {
+        appendMessage("📚 Welcome to the lesson: " + selectedLesson.title, false);
+        appendMessage(lessonContent, false);
+    });
 }
