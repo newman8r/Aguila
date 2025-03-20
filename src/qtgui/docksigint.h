@@ -108,6 +108,7 @@ private slots:
     void onChatsLoaded(const QVector<QPair<int, QString>> &chats);
     void onDspStateChanged(bool running);
     void onTabChanged(const QString &tabName);
+    void onLessonSelected(int index);
     void onNewFFTData(const std::vector<float>& fft_data, double center_freq, double bandwidth, double sample_rate);
     void runWaterfallOptimizer();  // New slot for FFT optimization
     void startFMTransmission();   // New slot for FM transmission
@@ -176,6 +177,7 @@ private:
     void createNewChat();
     void switchToChat(int chatId);
     void updateChatSelector();
+    void updateLessonSelector();
     void clearChat();
     void setupTabSystem();
     void moveVisualizerToTab();

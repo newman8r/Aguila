@@ -896,6 +896,8 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     connect(ui->newChatButton, &QPushButton::clicked, this, &DockSigint::onNewChatClicked);
     connect(ui->chatSelector, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &DockSigint::onChatSelected);
+    connect(ui->lessonSelector, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &DockSigint::onLessonSelected);
 
     // Add spectrum capture test shortcut
     auto *captureShortcut = new QShortcut(QKeySequence(Qt::CTRL | Qt::Key_G), this);
@@ -939,6 +941,8 @@ DockSigint::DockSigint(receiver *rx_ptr, QWidget *parent) :
     // Add at the start of the class implementation, after member initialization
     m_lastActiveChatLoaded = false;
     m_chatsLoaded = false;
+
+    updateLessonSelector();
 }
 
 DockSigint::~DockSigint()
@@ -2153,4 +2157,39 @@ void DockSigint::startFMTransmission()
         }
         process->deleteLater();
     });
+}
+
+void DockSigint::updateLessonSelector()
+{
+    ui->lessonSelector->clear();
+    ui->lessonSelector->addItem("Select a Lesson", "");
+    ui->lessonSelector->addItem("Introduction to Radio", "intro");
+    ui->lessonSelector->addItem("Radio Waves Fundamentals", "waves");
+    ui->lessonSelector->addItem("AM Modulation", "am");
+    ui->lessonSelector->addItem("FM Modulation", "fm");
+    ui->lessonSelector->addItem("Digital Modes", "digital");
+    ui->lessonSelector->addItem("Software Defined Radio Basics", "sdr");
+    ui->lessonSelector->addItem("Signal Processing Fundamentals", "signal");
+    ui->lessonSelector->addItem("Antennas & Propagation", "antennas");
+    ui->lessonSelector->addItem("Radio Regulations", "regulations");
+}
+
+void DockSigint::onLessonSelected(int index)
+{
+    if (index <= 0) {
+        return; // Skip the "Select a Lesson" option
+    }
+    
+    QString lessonId = ui->lessonSelector->itemData(index).toString();
+    QString lessonName = ui->lessonSelector->itemText(index);
+    
+    qDebug() << "\n=== 📚 Lesson Selected ===";
+    qDebug() << "  - Name:" << lessonName;
+    qDebug() << "  - ID:" << lessonId;
+    qDebug() << "=================================\n";
+    
+    // For now, just show a welcome message for the selected lesson
+    // We'll implement actual lesson content in future iterations
+    appendMessage("📚 Welcome to the lesson: " + lessonName, false);
+    appendMessage("This lesson will teach you about " + lessonName + ". We'll implement the full content in a future update.", false);
 }
